@@ -1,0 +1,25 @@
+# SentinelSQL — Layer 01 & Layer 02 Dependencies
+
+# Core Framework
+fastapi
+uvicorn[standard]
+pydantic
+
+# JWT & Authentication
+python-jose[cryptography]
+authlib
+httpx
+
+# Neo4j Graph Database (NEW - for user/role management)
+neo4j>=5.0.0
+
+# Database (optional - for PostgreSQL fallback)
+asyncpg
+psycopg2-binary
+
+# Testing
+pytest
+pytest-asyncio
+
+# Utilities
+python-dotenv

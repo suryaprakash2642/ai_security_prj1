@@ -1,0 +1,13 @@
+{
+  "verdict": "PASS",
+  "critical_issues": [],
+  "structural_gaps": [],
+  "minor_issues": [],
+  "constraints": [
+    "constraint_1f2bb7df",
+    "constraint_b370b7f2",
+    "constraint_c19aab74"
+  ],
+  "regulatory_report": [],
+  "policy_validation": []
+}

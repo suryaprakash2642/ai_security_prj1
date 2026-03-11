@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: sentinelsql-limitrange
+  namespace: sentinelsql
+spec:
+  limits:
+    - type: Container
+      # Applied to any container that does NOT specify its own resources
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "256Mi"
+      # Hard caps — no single container can exceed these
+      max:
+        cpu: "2"
+        memory: "2Gi"
+      min:
+        cpu: "10m"
+        memory: "64Mi"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: sentinelsql-quota
+  namespace: sentinelsql
+spec:
+  hard:
+    # Total requested across all pods in namespace
+    requests.cpu: "2"
+    requests.memory: "4Gi"
+    # Total limits across all pods in namespace
+    limits.cpu: "12"
+    limits.memory: "10Gi"
+    # Prevent runaway pod/service sprawl
+    pods: "30"
+    services: "20"
+    persistentvolumeclaims: "10"

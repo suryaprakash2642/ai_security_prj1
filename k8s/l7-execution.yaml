@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: l7-execution
+  namespace: sentinelsql
+  labels:
+    app: l7-execution
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: l7-execution
+  template:
+    metadata:
+      labels:
+        app: l7-execution
+    spec:
+      nodeSelector:
+        workload: sentinelsql
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: sentinelsql
+          effect: NoSchedule
+      containers:
+        - name: l7-execution
+          image: jimsonrats/l7-execution:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8700
+          env:
+            - name: MOCK_EXECUTION
+              value: "false"
+          envFrom:
+            - configMapRef:
+                name: sentinelsql-config
+            - secretRef:
+                name: sentinelsql-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8700
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8700
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: l7-execution
+  namespace: sentinelsql
+spec:
+  selector:
+    app: l7-execution
+  ports:
+    - protocol: TCP
+      port: 8700
+      targetPort: 8700

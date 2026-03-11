@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: l8-audit
+  namespace: sentinelsql
+  labels:
+    app: l8-audit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: l8-audit
+  template:
+    metadata:
+      labels:
+        app: l8-audit
+    spec:
+      nodeSelector:
+        workload: sentinelsql
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: sentinelsql
+          effect: NoSchedule
+      containers:
+        - name: l8-audit
+          image: jimsonrats/l8-audit:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8800
+          envFrom:
+            - configMapRef:
+                name: sentinelsql-config
+            - secretRef:
+                name: sentinelsql-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8800
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8800
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: l8-audit
+  namespace: sentinelsql
+spec:
+  selector:
+    app: l8-audit
+  ports:
+    - protocol: TCP
+      port: 8800
+      targetPort: 8800

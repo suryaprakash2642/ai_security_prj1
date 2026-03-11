@@ -1,0 +1,195 @@
+{
+    "domain_rules": [
+        {
+            "pattern": "patient",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "encounter",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "prescription",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "medication",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "vital",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "lab_result",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "radiology",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "diagnosis",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "surgery",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "discharge",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "nursing",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "ward",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "bed",
+            "domain": "clinical"
+        },
+        {
+            "pattern": "employee",
+            "domain": "hr"
+        },
+        {
+            "pattern": "payroll",
+            "domain": "hr"
+        },
+        {
+            "pattern": "leave",
+            "domain": "hr"
+        },
+        {
+            "pattern": "certification",
+            "domain": "hr"
+        },
+        {
+            "pattern": "credential",
+            "domain": "hr"
+        },
+        {
+            "pattern": "attendance",
+            "domain": "hr"
+        },
+        {
+            "pattern": "benefit",
+            "domain": "hr"
+        },
+        {
+            "pattern": "training",
+            "domain": "hr"
+        },
+        {
+            "pattern": "department",
+            "domain": "hr"
+        },
+        {
+            "pattern": "position",
+            "domain": "hr"
+        },
+        {
+            "pattern": "claim",
+            "domain": "billing"
+        },
+        {
+            "pattern": "billing",
+            "domain": "billing"
+        },
+        {
+            "pattern": "payment",
+            "domain": "billing"
+        },
+        {
+            "pattern": "invoice",
+            "domain": "billing"
+        },
+        {
+            "pattern": "payer",
+            "domain": "billing"
+        },
+        {
+            "pattern": "insurance",
+            "domain": "billing"
+        },
+        {
+            "pattern": "revenue",
+            "domain": "billing"
+        },
+        {
+            "pattern": "report",
+            "domain": "analytics"
+        },
+        {
+            "pattern": "dashboard",
+            "domain": "analytics"
+        },
+        {
+            "pattern": "metric",
+            "domain": "analytics"
+        },
+        {
+            "pattern": "kpi",
+            "domain": "analytics"
+        },
+        {
+            "pattern": "statistical",
+            "domain": "analytics"
+        },
+        {
+            "pattern": "audit",
+            "domain": "audit"
+        },
+        {
+            "pattern": "change_log",
+            "domain": "audit"
+        },
+        {
+            "pattern": "access_log",
+            "domain": "audit"
+        },
+        {
+            "pattern": "event_log",
+            "domain": "audit"
+        },
+        {
+            "pattern": "policy_version",
+            "domain": "audit"
+        },
+        {
+            "pattern": "graph_version",
+            "domain": "audit"
+        },
+        {
+            "pattern": "role",
+            "domain": "security"
+        },
+        {
+            "pattern": "policy",
+            "domain": "security"
+        },
+        {
+            "pattern": "permission",
+            "domain": "security"
+        }
+    ],
+    "clinical_table_patterns": [
+        "patient",
+        "encounter",
+        "prescription",
+        "medication",
+        "vital",
+        "lab_result",
+        "radiology",
+        "diagnosis",
+        "surgery",
+        "discharge",
+        "clinical",
+        "nursing",
+        "icu"
+    ]
+}

@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: front-end
+  namespace: sentinelsql
+  labels:
+    app: front-end
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: front-end
+  template:
+    metadata:
+      labels:
+        app: front-end
+    spec:
+      nodeSelector:
+        workload: sentinelsql
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: sentinelsql
+          effect: NoSchedule
+      containers:
+        - name: front-end
+          image: jimsonrats/front-end:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: sentinelsql-config
+            - secretRef:
+                name: sentinelsql-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: front-end
+  namespace: sentinelsql
+spec:
+  selector:
+    app: front-end
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000

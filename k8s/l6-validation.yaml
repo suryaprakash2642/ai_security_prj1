@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: l6-validation
+  namespace: sentinelsql
+  labels:
+    app: l6-validation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: l6-validation
+  template:
+    metadata:
+      labels:
+        app: l6-validation
+    spec:
+      nodeSelector:
+        workload: sentinelsql
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: sentinelsql
+          effect: NoSchedule
+      containers:
+        - name: l6-validation
+          image: jimsonrats/l6-validation:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8600
+          envFrom:
+            - configMapRef:
+                name: sentinelsql-config
+            - secretRef:
+                name: sentinelsql-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8600
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8600
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: l6-validation
+  namespace: sentinelsql
+spec:
+  selector:
+    app: l6-validation
+  ports:
+    - protocol: TCP
+      port: 8600
+      targetPort: 8600

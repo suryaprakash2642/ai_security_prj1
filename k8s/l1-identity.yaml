@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: l1-identity
+  namespace: sentinelsql
+  labels:
+    app: l1-identity
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: l1-identity
+  template:
+    metadata:
+      labels:
+        app: l1-identity
+    spec:
+      nodeSelector:
+        workload: sentinelsql
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: sentinelsql
+          effect: NoSchedule
+      containers:
+        - name: l1-identity
+          image: jimsonrats/l1-identity:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8001
+          envFrom:
+            - configMapRef:
+                name: sentinelsql-config
+            - secretRef:
+                name: sentinelsql-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: l1-identity
+  namespace: sentinelsql
+spec:
+  selector:
+    app: l1-identity
+  ports:
+    - protocol: TCP
+      port: 8001
+      targetPort: 8001

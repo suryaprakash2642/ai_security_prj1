@@ -1,0 +1,70 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sentinelsql-layers-ingress
+  namespace: sentinelsql
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx-sentinelsql
+  rules:
+    - host: sentinelsql.centralindia.cloudapp.azure.com
+      http:
+        paths:
+          - path: /api/l1(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: l1-identity
+                port:
+                  number: 8001
+          - path: /api/l2(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: l2-knowledge
+                port:
+                  number: 8002
+          - path: /api/l3(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: l3-retrieval
+                port:
+                  number: 8300
+          - path: /api/l4(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: l4-policy
+                port:
+                  number: 8400
+          - path: /api/l5(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: l5-generation
+                port:
+                  number: 8500
+          - path: /api/l6(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: l6-validation
+                port:
+                  number: 8600
+          - path: /api/l7(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: l7-execution
+                port:
+                  number: 8700
+          - path: /api/l8(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: l8-audit
+                port:
+                  number: 8800

@@ -1,0 +1,42 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sentinelsql-ingress
+  namespace: sentinelsql
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    # CORS
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+spec:
+  ingressClassName: nginx-sentinelsql
+  tls:
+    - hosts:
+        - sentinelsql.centralindia.cloudapp.azure.com
+      secretName: sentinelsql-tls
+  rules:
+    - host: sentinelsql.centralindia.cloudapp.azure.com
+      http:
+        paths:
+          # API Layer (Front-end FastAPI)
+          - path: /api/
+            pathType: Prefix
+            backend:
+              service:
+                name: front-end
+                port:
+                  number: 8000
+          
+          # Static Frontend (Catch-all)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

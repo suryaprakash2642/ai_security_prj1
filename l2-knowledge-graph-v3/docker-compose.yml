@@ -1,0 +1,73 @@
+version: "3.9"
+
+services:
+  neo4j:
+    image: neo4j:5.17-enterprise
+    hostname: neo4j
+    ports:
+      - "7474:7474"   # Browser
+      - "7687:7687"   # Bolt
+    environment:
+      NEO4J_AUTH: neo4j/changeme123
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_server_bolt_tls__level: OPTIONAL
+    volumes:
+      - neo4j_data:/data
+      
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "changeme123", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    hostname: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: l2_admin
+      POSTGRES_PASSWORD: changeme123
+      POSTGRES_DB: l2_audit
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U l2_admin"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    hostname: redis
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass changeme123
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "changeme123", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  l2-api:
+    build: .
+    ports:
+      - "8002:8002"
+    env_file: .env
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      uvicorn app.main:create_app --factory
+      --host 0.0.0.0 --port 8002 --workers 4
+
+volumes:
+  neo4j_data:
+  pg_data:

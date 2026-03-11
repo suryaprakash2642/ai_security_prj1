@@ -1,0 +1,51 @@
+name: CD (Continuous Deployment)
+
+on:
+  workflow_run:
+    workflows: ["CI (Continuous Integration)"]
+    # branches: [ "master", "main" ]
+    types:
+      - completed
+
+jobs:
+  cd:
+    name: Continuous Deployment (Release)
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: dev
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        
+      - name: Configure Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+
+      - name: Prepare Kubernetes Manifests
+        run: |
+          # Inject secrets into secrets.yaml
+          sed -i "s/REPLACE_WITH_NEO4J_PASSWORD/${{ secrets.NEO4J_PASSWORD }}/g" k8s/secrets.yaml
+          sed -i "s/REPLACE_WITH_POSTGRES_PASSWORD/${{ secrets.AIVEN_PG_PASSWORD }}/g" k8s/secrets.yaml
+          
+          # Replace 'latest' tag with the SHA built in CI across ALL deployment files
+          # This regex finds 'jimsonrats/any-text:latest' and replaces it with the commit SHA
+          sed -i "s|jimsonrats/\([a-zA-Z0-9-]*\):latest|jimsonrats/\1:${{ github.event.workflow_run.head_sha }}|g" k8s/*.yaml
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -f k8s/namespace.yaml || true
+          kubectl apply -f k8s/configmap.yaml
+          kubectl apply -f k8s/secrets.yaml
+          
+          # Apply everything else (Deployments, Services, etc)
+          kubectl apply -f k8s/
+          
+          # (Optional) Wait for some essential services to verify deployment
+          kubectl rollout status deployment/l1-identity -n sentinelsql
+          kubectl rollout status deployment/l2-knowledge -n sentinelsql
+          kubectl rollout status deployment/front-end -n sentinelsql

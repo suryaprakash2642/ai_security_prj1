@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: l3-retrieval
+  namespace: sentinelsql
+  labels:
+    app: l3-retrieval
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: l3-retrieval
+  template:
+    metadata:
+      labels:
+        app: l3-retrieval
+    spec:
+      nodeSelector:
+        workload: sentinelsql
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: sentinelsql
+          effect: NoSchedule
+      containers:
+        - name: l3-retrieval
+          image: jimsonrats/l3-retrieval:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8300
+          env:
+            - name: L3_L2_BASE_URL
+              value: http://l2-knowledge:8002
+            - name: L3_L4_BASE_URL
+              value: http://l4-policy:8400
+            - name: L3_REDIS_URL
+              value: redis://redis:6379/1
+            - name: L3_SERVICE_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sentinelsql-secrets
+                  key: SERVICE_TOKEN_SECRET
+          envFrom:
+            - configMapRef:
+                name: sentinelsql-config
+            - secretRef:
+                name: sentinelsql-secrets
+          readinessProbe:
+            httpGet:
+              path: /api/v1/retrieval/health
+              port: 8300
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/retrieval/health
+              port: 8300
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: l3-retrieval
+  namespace: sentinelsql
+spec:
+  selector:
+    app: l3-retrieval
+  ports:
+    - protocol: TCP
+      port: 8300
+      targetPort: 8300
