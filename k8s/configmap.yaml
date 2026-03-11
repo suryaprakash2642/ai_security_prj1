@@ -4,45 +4,33 @@ metadata:
   name: sentinelsql-config
   namespace: sentinelsql
 data:
-  # Base Environment
-  APP_ENV: "production"
+  AIVEN_PG_HOST: "REPLACE_WITH_AIVEN_PG_HOST"
+  AIVEN_PG_PORT: "REPLACE_WITH_AIVEN_PG_PORT"
+  APP_ENV: "REPLACE_WITH_APP_ENV"
+  AZURE_AI_ENDPOINT: "REPLACE_WITH_AZURE_AI_ENDPOINT"
+  AZURE_OPENAI_DEPLOYMENT: "REPLACE_WITH_AZURE_OPENAI_DEPLOYMENT"
+  AZURE_OPENAI_FALLBACK_DEPLOYMENT: "REPLACE_WITH_AZURE_OPENAI_FALLBACK_DEPLOYMENT"
+  CORS_ORIGINS: "REPLACE_WITH_CORS_ORIGINS"
+  IDP_AUDIENCE: "REPLACE_WITH_IDP_AUDIENCE"
+  IDP_ISSUER: "REPLACE_WITH_IDP_ISSUER"
+  IDP_JWKS_URI: "REPLACE_WITH_IDP_JWKS_URI"
+  MYSQL_DBNAME_HIS: "REPLACE_WITH_MYSQL_DBNAME_HIS"
+  MYSQL_DBNAME_HR: "REPLACE_WITH_MYSQL_DBNAME_HR"
+  MYSQL_HOST: "REPLACE_WITH_MYSQL_HOST"
+  MYSQL_PORT: "REPLACE_WITH_MYSQL_PORT"
+  MYSQL_SSL: "REPLACE_WITH_MYSQL_SSL"
+  NEO4J_DATABASE: "REPLACE_WITH_NEO4J_DATABASE"
+  NEO4J_USERNAME: "REPLACE_WITH_NEO4J_USERNAME"
+  NEO4J_READ_USER: "REPLACE_WITH_NEO4J_READ_USER"
+  NEO4J_WRITE_USER: "REPLACE_WITH_NEO4J_WRITE_USER"
+  NEO4J_ENCRYPTED: "REPLACE_WITH_NEO4J_ENCRYPTED"
+  NEO4J_URI: "REPLACE_WITH_NEO4J_URI"
+  POSTGRES_DBNAME_ANALYTICS: "REPLACE_WITH_POSTGRES_DBNAME_ANALYTICS"
+  POSTGRES_DBNAME_FINANCIAL: "REPLACE_WITH_POSTGRES_DBNAME_FINANCIAL"
+  POSTGRES_SSLMODE: "REPLACE_WITH_POSTGRES_SSLMODE"
+  USE_MOCK_IDP: "REPLACE_WITH_USE_MOCK_IDP"
+  VAULT_ADDR: "REPLACE_WITH_VAULT_ADDR"
   
-  # Identity configuration
-  USE_MOCK_IDP: "true"
-  IDP_JWKS_URI: "https://dev.okta.com/oauth2/v1/keys"
-  IDP_ISSUER: "https://dev.okta.com"
-  IDP_AUDIENCE: "api://sentinelsql"
-  CORS_ORIGINS: "http://sentinelsql.yourdomain.com,https://sentinelsql.yourdomain.com"
-  
-  # Neo4j Database
-  NEO4J_URI: "neo4j+s://5ddec823.databases.neo4j.io"
-  NEO4J_DATABASE: "5ddec823"
-  NEO4J_ENCRYPTED: "true"
-  
-  # Aiven Postgres
-  AIVEN_PG_HOST: "pg-hospital-system-hospital-syatem.k.aivencloud.com"
-  AIVEN_PG_PORT: "21400"
-  POSTGRES_HOST: "pg-hospital-system-hospital-syatem.k.aivencloud.com"  # L7 field name
-  POSTGRES_USER: "avnadmin"  # L7 field name
-  POSTGRES_DBNAME_ANALYTICS: "apollo_analytics"
-  POSTGRES_DBNAME_FINANCIAL: "apollo_financial"
-  POSTGRES_SSLMODE: "require"
-  
-  # Aiven MySQL
-  MYSQL_HOST: "mysql-hospital-system-hospital-syatem.k.aivencloud.com"
-  MYSQL_PORT: "21400"
-  MYSQL_DBNAME_HIS: "ApolloHIS"
-  MYSQL_DBNAME_HR: "ApolloHR"
-  MYSQL_SSL: "true"
+  SENTINELSQL_PUBLIC_KEY: |
+REPLACE_WITH_SENTINELSQL_PUBLIC_KEY
 
-  # Azure OpenAI
-  AZURE_AI_ENDPOINT: "https://anndocextopenai.cognitiveservices.azure.com/"
-  AZURE_OPENAI_DEPLOYMENT: "gpt-4.1"
-  AZURE_OPENAI_FALLBACK_DEPLOYMENT: "gpt-4.1-mini"
-  
-  # Redis URL
-  REDIS_URL: "redis://redis.sentinelsql.svc.cluster.local:6379/0"
-  L1_REDIS_URL: "redis://redis.sentinelsql.svc.cluster.local:6379/0"
-  
-  # Vault (If used)
-  VAULT_ADDR: "http://vault:8200"

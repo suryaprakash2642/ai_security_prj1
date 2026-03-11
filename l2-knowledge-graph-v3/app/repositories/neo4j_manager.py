@@ -16,6 +16,7 @@ from typing import Any, AsyncIterator
 
 import structlog
 from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncManagedTransaction, AsyncSession
+from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential
 
 from app.config import Settings
 
@@ -86,9 +87,22 @@ class Neo4jManager:
             **common_kwargs,
         )
 
-        # Verify connectivity
-        await self._read_driver.verify_connectivity()
-        await self._write_driver.verify_connectivity()
+        # Verify connectivity — retry with exponential back-off so transient
+        # Neo4j startup delays (race condition in Kubernetes) don't crash the pod.
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(10),
+            wait=wait_exponential(multiplier=1, min=2, max=30),
+            reraise=True,
+        ):
+            with attempt:
+                if attempt.retry_state.attempt_number > 1:
+                    logger.warning(
+                        "neo4j_connect_retry",
+                        attempt=attempt.retry_state.attempt_number,
+                        uri=self._settings.neo4j_uri,
+                    )
+                await self._read_driver.verify_connectivity()
+                await self._write_driver.verify_connectivity()
         logger.info("neo4j_connected", uri=self._settings.neo4j_uri)
 
     async def close(self) -> None:
