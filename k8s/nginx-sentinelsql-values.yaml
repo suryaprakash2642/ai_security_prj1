@@ -1,0 +1,9 @@
+controller:
+  config:
+    # Without this, Azure LB health probe gets 404 (no Host header match)
+    # causing ALL backends to be marked unhealthy and dropping all external traffic.
+    server-snippet: |
+      location /healthcheck {
+        return 200 'ok';
+        add_header Content-Type text/plain;
+      }

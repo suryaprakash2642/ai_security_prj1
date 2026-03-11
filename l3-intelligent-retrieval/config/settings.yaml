@@ -1,0 +1,59 @@
+# L3 Intelligent Retrieval — Application Configuration
+# Environment variables override YAML values (uppercase, L3_ prefix).
+
+service:
+  name: "l3-intelligent-retrieval"
+  version: "0.1.0"
+  env: "development"  # development | staging | production
+
+api:
+  host: "0.0.0.0"
+  port: 8300
+  rate_limit_per_minute: 300
+
+security:
+  service_token_secret: "dev-secret-change-in-production-min-32-chars-xx"
+  allowed_service_ids: "l1-identity,l5-generation,admin-console,test-service,admin-service"
+  context_max_age_seconds: 3600
+  # HMAC key for verifying SecurityContext signatures from L1
+  context_signing_key: "dev-context-signing-key-32-chars-min"
+
+embedding:
+  primary_provider: "voyage"
+  fallback_provider: "openai"
+  voyage_api_key: ""  # Set via L3_EMBEDDING_VOYAGE_API_KEY
+  voyage_model: "voyage-3-large"
+  openai_api_key: ""  # Set via L3_EMBEDDING_OPENAI_API_KEY
+  openai_model: "text-embedding-3-large"
+  # Azure OpenAI — takes priority over voyage/openai when configured
+  azure_api_key: ""  # Set via L3_EMBEDDING_AZURE_API_KEY
+  azure_endpoint: "https://anndocextopenai.cognitiveservices.azure.com/"
+  azure_deployment: "text-embedding-ada-002"
+  azure_api_version: "2024-02-01"
+  dimensions: 1536
+  cache_ttl_seconds: 900  # 15 min
+  cache_max_entries: 10000
+
+l2_knowledge_graph:
+  base_url: "http://localhost:8002"
+  timeout_seconds: 5
+  service_id: "l3-retrieval"
+  service_role: "pipeline_reader"
+
+l4_policy_resolution:
+  base_url: "http://localhost:8400"
+  timeout_seconds: 60
+  service_id: "l3-retrieval"
+  service_role: "policy_resolver"
+
+redis:
+  url: "redis://localhost:6379/1"
+  max_connections: 20
+
+pgvector:
+  dsn: ""  # Set via L3_PGVECTOR_DSN
+  ssl: true
+
+metrics:
+  enabled: true
+  prefix: "l3_retrieval"
