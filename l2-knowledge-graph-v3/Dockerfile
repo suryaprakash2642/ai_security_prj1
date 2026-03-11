@@ -14,4 +14,4 @@ RUN adduser --disabled-password --gecos "" l2user
 USER l2user
 
 EXPOSE 8002
-CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8002", "--workers", "1"]

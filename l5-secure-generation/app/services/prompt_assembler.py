@@ -43,7 +43,7 @@ ABSOLUTE RULES:
 
 _DIALECT_HINTS = {
     SQLDialect.POSTGRESQL: "PostgreSQL. Use LIMIT N, COALESCE(), standard SQL.",
-    SQLDialect.MYSQL: "MySQL. Use LIMIT N, IFNULL(), CURDATE(), DATE_SUB(), STR_TO_DATE(). Do NOT use date_trunc or INTERVAL syntax from PostgreSQL.",
+    SQLDialect.MYSQL: "MySQL. Use LIMIT N, IFNULL(), CURDATE(), DATE_SUB(CURDATE(), INTERVAL N DAY). For INTERVAL always include the unit keyword: INTERVAL 30 DAY, INTERVAL 6 MONTH — never write INTERVAL '200' without a unit. Do NOT use date_trunc or PostgreSQL-style INTERVAL '30 days'. Only reference tables and columns provided in the schema — do NOT invent tables like 'units' or 'beds'.",
     SQLDialect.TSQL: "Microsoft SQL Server T-SQL. Use TOP N, bracket-quoted names, ISNULL().",
     SQLDialect.ORACLE: "Oracle PL/SQL. Use FETCH FIRST N ROWS ONLY, NVL(), SYSDATE.",
 }

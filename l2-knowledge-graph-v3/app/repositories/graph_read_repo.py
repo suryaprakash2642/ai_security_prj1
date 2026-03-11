@@ -7,6 +7,7 @@ parameterized, and goes through this repository.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import structlog
@@ -27,6 +28,22 @@ from app.models.enums import PolicyType
 from app.repositories.neo4j_manager import Neo4jManager
 
 logger = structlog.get_logger(__name__)
+
+
+def _sanitize_fulltext_query(query: str, max_length: int = 200) -> str:
+    """Strip Lucene special characters from a fulltext query.
+
+    Neo4j's db.index.fulltext.queryNodes uses Lucene query syntax, so square
+    brackets, colons, and other reserved chars cause ParseException when they
+    appear in plain user text or injected metadata tags like [role:X dept:Y].
+    """
+    # Remove injected metadata tags: [department:Cardiology role:ATTENDING_PHYSICIAN]
+    cleaned = re.sub(r'\[.*?\]', ' ', query)
+    # Remove remaining Lucene reserved characters
+    cleaned = re.sub(r'[+\-&|!(){}^"~*?:\\/]', ' ', cleaned)
+    # Collapse whitespace and cap length
+    cleaned = ' '.join(cleaned.split())[:max_length]
+    return cleaned or '*'
 
 
 class GraphReadRepository:
@@ -108,6 +125,7 @@ class GraphReadRepository:
 
     async def search_tables(self, query_text: str, limit: int = 20) -> list[TableResponse]:
         """Full-text search over table names and descriptions."""
+        query_text = _sanitize_fulltext_query(query_text)
         query = """
         CALL db.index.fulltext.queryNodes('table_search', $query_text)
         YIELD node, score
@@ -263,6 +281,41 @@ class GraphReadRepository:
                 )
             )
         return results
+
+    async def get_role_domain_access(
+        self, roles: list[str], include_inherited: bool = True
+    ) -> dict[str, list[str]]:
+        """Return domain access map keyed by input role name."""
+        if not roles:
+            return {}
+
+        if include_inherited:
+            query = """
+            UNWIND $roles AS role_name
+            MATCH (r:Role {name: role_name})
+            OPTIONAL MATCH (r)-[:INHERITS_FROM*0..10]->(ancestor:Role)
+            WITH role_name, collect(DISTINCT ancestor.name) + collect(DISTINCT r.name) AS all_roles
+            UNWIND all_roles AS rn
+            MATCH (role:Role {name: rn})<-[:APPLIES_TO_ROLE]-(p:Policy)
+            WHERE p.is_active = true
+            OPTIONAL MATCH (p)-[:GOVERNS_DOMAIN]->(d:Domain)
+            RETURN role_name, collect(DISTINCT d.name) AS domains
+            """
+        else:
+            query = """
+            UNWIND $roles AS role_name
+            MATCH (r:Role {name: role_name})<-[:APPLIES_TO_ROLE]-(p:Policy)
+            WHERE p.is_active = true
+            OPTIONAL MATCH (p)-[:GOVERNS_DOMAIN]->(d:Domain)
+            RETURN role_name, collect(DISTINCT d.name) AS domains
+            """
+
+        records = await self._neo4j.execute_read(query, {"roles": roles})
+        role_map: dict[str, list[str]] = {r: [] for r in roles}
+        for row in records:
+            domains = [d for d in row.get("domains", []) if d]
+            role_map[row["role_name"]] = sorted(set(domains))
+        return role_map
 
     async def get_hard_deny_tables(self) -> list[str]:
         """Return FQNs of all tables with hard_deny = true."""

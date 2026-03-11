@@ -18,7 +18,6 @@ from app.models.enums import (
     RetrievalStrategy,
     TableDecision,
 )
-from app.models.l4_models import PermissionEnvelope
 
 
 # ── Intent classification output ────────────────────────────
@@ -185,9 +184,6 @@ class RetrievalResult(BaseModel):
 
     # Policy rules in natural language for LLM instruction
     nl_policy_rules: list[str] = Field(default_factory=list)
-
-    # Signed policy envelope from L4 for downstream verification (L5/L6/L7)
-    permission_envelope: PermissionEnvelope | None = None
 
     # Security summary (no details about denied tables)
     denied_tables_count: int = 0

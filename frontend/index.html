@@ -217,8 +217,9 @@
             <button class="btn-success" id="btn-run" onclick="runPipeline()" disabled>▶ Run</button>
             <button class="btn-ghost" onclick="clearResults()">✕ Clear</button>
             <select id="dialect-select" style="width:auto">
-              <option value="postgresql">PostgreSQL</option>
+              <option value="auto" selected>Auto-detect</option>
               <option value="mysql">MySQL</option>
+              <option value="postgresql">PostgreSQL</option>
             </select>
           </div>
         </div>
@@ -429,9 +430,14 @@ function setPipeStep(id, status) {
 
 function renderPipelineViz() {
   const steps = [
-    {id:'l1',label:'L1\nIdentity'}, {id:'l3',label:'L3\nRetrieval'},
-    {id:'l5',label:'L5\nGeneration'}, {id:'l6',label:'L6\nValidation'},
-    {id:'l7',label:'L7\nExecution'}, {id:'l8',label:'L8\nAudit'},
+    {id:'l1',label:'L1\nIdentity'},
+    {id:'l2',label:'L2\nKnowledge Graph'},
+    {id:'l3',label:'L3\nRetrieval'},
+    {id:'l4',label:'L4\nPolicy'},
+    {id:'l5',label:'L5\nGeneration'},
+    {id:'l6',label:'L6\nValidation'},
+    {id:'l7',label:'L7\nExecution'},
+    {id:'l8',label:'L8\nAudit'},
   ];
   const viz = document.getElementById('pipeline-viz');
   viz.innerHTML = steps.map((s, i) => {
@@ -628,13 +634,16 @@ async function runPipeline() {
   document.getElementById('pipeline-status').textContent = '';
 
   const dialect = document.getElementById('dialect-select').value;
+  const autoDialect = dialect === 'auto';
   const sc = state.securityContext;
 
   // ── L1 already done (auth) ─────────────────────────────
   setPipeStep('l1', 'done');
 
   // ── L3: Retrieval ─────────────────────────────────────
-  setPipeStep('l3', 'running'); setLayerState('l3', 'active');
+  setPipeStep('l2', 'running'); setLayerState('l2', 'active', 'Querying Neo4j...');
+  setPipeStep('l3', 'running'); setLayerState('l3', 'active', 'Searching tables...');
+  setPipeStep('l4', 'running'); setLayerState('l4', 'active', 'Resolving policies...');
   document.getElementById('pipeline-status').textContent = 'L3: Retrieving schema and resolving policies…';
   const t3 = Date.now();
 
@@ -654,6 +663,8 @@ async function runPipeline() {
 
   if (!l3Res.ok) {
     setPipeStep('l3', 'error'); setLayerState('l3', 'error');
+    setPipeStep('l2', 'error'); setLayerState('l2', 'error');
+    setPipeStep('l4', 'error'); setLayerState('l4', 'error');
     ['l5','l6','l7','l8'].forEach(l => setPipeStep(l, 'pending'));
     addLayerDetail('l3', 'Retrieval FAILED', l3Res.data, 'error');
     finishPipeline(false, 'L3 Retrieval failed: ' + (l3Res.data?.detail || JSON.stringify(l3Res.data)));
@@ -664,6 +675,8 @@ async function runPipeline() {
   state.l3Response = l3Result;
   setPipeStep('l3', 'done'); setLayerState('l3', 'success'); setLayerMs('l3', ms3);
   // L2 and L4 are called internally by L3
+  setPipeStep('l2', 'done');
+  setPipeStep('l4', 'done');
   setLayerState('l2', 'success');
   setLayerState('l4', 'success');
   addLayerDetail('l3', `Retrieval OK — ${(l3Result.filtered_schema||[]).length} tables`, l3Result);
@@ -673,25 +686,85 @@ async function runPipeline() {
   document.getElementById('pipeline-status').textContent = 'L5: Generating SQL with LLM…';
   const t5 = Date.now();
 
-  // Prefer signed permission_envelope from L3 (originating from L4)
-  // Fallback keeps current behavior if older L3 image does not return envelope yet.
-  const l3Tables = l3Result.filtered_schema || [];
-  const fallbackEnvelope = {
-    request_id: state.requestId,
-    table_permissions: l3Tables.map(t => ({
-      table_id: t.table_id,
-      decision: 'ALLOW',
-      columns: (t.visible_columns || []).map(c => ({ column_name: c.name || c.column_name, visibility: 'VISIBLE' })),
-      row_filters: t.row_filters || [],
-      aggregation_only: t.aggregation_only || false,
-      nl_rules: [],
-    })),
-    global_nl_rules: l3Result.nl_policy_rules || [],
-    join_restrictions: [],
-    signature: '',
-  };
-  const permissionEnvelope = l3Result.permission_envelope || fallbackEnvelope;
-  // Build filtered_schema in L5-expected format
+  // Strict security contract: L3/L4 must provide a signed permission envelope.
+  const allL3Tables = l3Result.filtered_schema || [];
+  const MYSQL_DBS = ['apollohis', 'apollohr'];
+  const PG_DBS = ['apollo_analytics', 'apollo_financial'];
+
+  // ── Detect dialect & target DB from ALL retrieved tables first ──
+  const dbCounts = {};
+  for (const t of allL3Tables) {
+    const dbPart = (t.table_id || '').split('.')[0].toLowerCase();
+    dbCounts[dbPart] = (dbCounts[dbPart] || 0) + (t.relevance_score || 1);
+  }
+  let detectedDb = '';
+  let detectedDialect = dialect === 'auto' ? 'postgresql' : dialect;
+  let maxScore = 0;
+  for (const [db, score] of Object.entries(dbCounts)) {
+    if (score > maxScore) {
+      maxScore = score;
+      detectedDb = db;
+      if (autoDialect) {
+        if (MYSQL_DBS.includes(db)) detectedDialect = 'mysql';
+        else if (PG_DBS.includes(db)) detectedDialect = 'postgresql';
+      }
+    }
+  }
+  // If user explicitly selected a dialect, pick best DB within that family.
+  if (!autoDialect) {
+    const allowed = dialect === 'mysql' ? MYSQL_DBS : PG_DBS;
+    let bestDb = '';
+    let bestScore = -1;
+    for (const [db, score] of Object.entries(dbCounts)) {
+      if (allowed.includes(db) && score > bestScore) {
+        bestDb = db;
+        bestScore = score;
+      }
+    }
+    if (bestDb) detectedDb = bestDb;
+  }
+
+  // ── Filter tables to the detected/selected dialect family only ──
+  const targetDbs = detectedDialect === 'mysql' ? MYSQL_DBS : PG_DBS;
+  const l3Tables = allL3Tables.filter(t => {
+    const dbPart = (t.table_id || '').split('.')[0].toLowerCase();
+    return targetDbs.includes(dbPart);
+  });
+
+  if (!detectedDb && l3Tables.length) {
+    detectedDb = (l3Tables[0].table_id || '').split('.')[0] || 'mock';
+  }
+  console.log('[Pipeline] Detected DB:', detectedDb, 'Dialect:', detectedDialect, 'Counts:', dbCounts);
+
+  const permissionEnvelope = l3Result.permission_envelope || l3Res.data?.permission_envelope;
+
+  if (!permissionEnvelope?.signature) {
+    setPipeStep('l5', 'error');
+    setLayerState('l5', 'error');
+    addLayerDetail('l5', 'Missing signed permission envelope from L3/L4', {
+      request_id: state.requestId,
+      l3_keys: Object.keys(l3Result || {}),
+      has_permission_envelope: Boolean(l3Result.permission_envelope || l3Res.data?.permission_envelope),
+    }, 'error');
+    finishPipeline(false, 'SECURITY BLOCK: Missing signed envelope from L3/L4. Request aborted.');
+    return;
+  }
+
+  if (!l3Tables.length) {
+    setPipeStep('l5', 'error');
+    setLayerState('l5', 'error');
+    addLayerDetail('l5', 'No tables available for selected dialect', {
+      selected_dialect: dialect,
+      detected_dialect: detectedDialect,
+      available_tables: allL3Tables.length,
+    }, 'error');
+    finishPipeline(false, `No ${detectedDialect} tables available for this request. Try switching dialect.`);
+    return;
+  }
+
+  // Build filtered_schema for L5 — only tables matching the detected dialect,
+  // and only join edges between tables that are in the filtered set.
+  const l3TableIds = new Set(l3Tables.map(t => t.table_id));
   const filteredSchemaForL5 = {
     tables: l3Tables.map(t => ({
       table_id: t.table_id,
@@ -709,35 +782,19 @@ async function runPipeline() {
       row_filters: t.row_filters || [],
       aggregation_only: t.aggregation_only || false,
     })),
-    join_graph: (l3Result.join_graph?.edges || []),
+    join_graph: (l3Result.join_graph?.edges || [])
+      .filter(e => {
+        const ft = e.from_table || e.source_table || '';
+        const tt = e.to_table || e.target_table || '';
+        return l3TableIds.has(ft) && l3TableIds.has(tt);
+      })
+      .map(e => ({
+        from_table: e.from_table || e.source_table || '',
+        from_column: e.from_column || e.source_column || '',
+        to_table: e.to_table || e.target_table || '',
+        to_column: e.to_column || e.target_column || '',
+      })),
   };
-
-  // ── Auto-detect target database & dialect from L3 table IDs ──
-  // table_id format: "ApolloHIS.ApolloHIS.patients" or "apollo_financial.public.claims"
-  // Count tables per database and pick the one with the most tables
-  const MYSQL_DBS = ['apollohis', 'apollohr'];
-  const PG_DBS = ['apollo_analytics', 'apollo_financial'];
-  const dbCounts = {};
-  for (const t of l3Tables) {
-    const dbPart = (t.table_id || '').split('.')[0].toLowerCase();
-    dbCounts[dbPart] = (dbCounts[dbPart] || 0) + (t.relevance_score || 1);
-  }
-  // Pick DB with highest total relevance score
-  let detectedDb = '';
-  let detectedDialect = dialect;
-  let maxScore = 0;
-  for (const [db, score] of Object.entries(dbCounts)) {
-    if (score > maxScore) {
-      maxScore = score;
-      detectedDb = db;
-      if (MYSQL_DBS.includes(db)) detectedDialect = 'mysql';
-      else if (PG_DBS.includes(db)) detectedDialect = 'postgresql';
-    }
-  }
-  if (!detectedDb && l3Tables.length) {
-    detectedDb = (l3Tables[0].table_id || '').split('.')[0] || 'mock';
-  }
-  console.log('[Pipeline] Detected DB:', detectedDb, 'Dialect:', detectedDialect, 'Counts:', dbCounts);
 
   const l5Body = {
     request_id: state.requestId,
@@ -846,15 +903,27 @@ async function runPipeline() {
   const sqlLower = validatedSql.toLowerCase();
   let sqlTargetDb = detectedDb;
   let sqlDialect = detectedDialect;
+  const allowedDbs = autoDialect
+    ? [...MYSQL_DBS, ...PG_DBS]
+    : (dialect === 'mysql' ? MYSQL_DBS : PG_DBS);
+
   for (const t of l3Tables) {
     const tName = (t.table_name || t.table_id.split('.').pop() || '').toLowerCase();
-    if (tName && sqlLower.includes(tName)) {
-      const dbPart = (t.table_id || '').split('.')[0].toLowerCase();
-      sqlTargetDb = dbPart;
+    if (!tName || !sqlLower.includes(tName)) continue;
+
+    const dbPart = (t.table_id || '').split('.')[0].toLowerCase();
+    if (!allowedDbs.includes(dbPart)) continue;
+
+    sqlTargetDb = dbPart;
+    if (autoDialect) {
       sqlDialect = MYSQL_DBS.includes(dbPart) ? 'mysql' : PG_DBS.includes(dbPart) ? 'postgresql' : detectedDialect;
-      console.log('[Pipeline] SQL matched table:', tName, '→ DB:', dbPart);
-      break;
     }
+    console.log('[Pipeline] SQL matched table:', tName, '→ DB:', dbPart);
+    break;
+  }
+
+  if (!autoDialect) {
+    console.log('[Pipeline] Manual dialect lock:', dialect, 'DB:', sqlTargetDb || '(none)');
   }
 
   const l7Body = {

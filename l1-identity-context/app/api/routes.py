@@ -410,6 +410,7 @@ async def generate_mock_token(
         "bill-maria-5521":  {"oid":"oid-bill-maria-5521",  "name":"Maria Fernandes",     "email":"maria.fernandes@apollohospitals.com","roles":["BILLING_CLERK"],      "groups":["billing-revenue"],      "clearance":2},
         "bill-suresh-5530": {"oid":"oid-bill-suresh-5530", "name":"Suresh Gupta",        "email":"suresh.gupta@apollohospitals.com",   "roles":["REVENUE_CYCLE_ANALYST"],"groups":["billing-revenue"],    "clearance":2},
         "it-admin-7801":    {"oid":"oid-it-admin-7801",    "name":"Vikram Joshi",        "email":"vikram.joshi@apollohospitals.com",   "roles":["IT_ADMINISTRATOR"],   "groups":["it-operations"],        "clearance":2},
+        "rev-james-6601":   {"oid":"oid-rev-james-6601",   "name":"James Thomas",        "email":"james.thomas@apollohospitals.com",  "roles":["REVENUE_CYCLE_MANAGER"],"groups":["billing-revenue"],    "clearance":2},
         "hr-priya-7701":    {"oid":"oid-hr-priya-7701",    "name":"Priya Mehta",         "email":"priya.mehta@apollohospitals.com",    "roles":["HR_MANAGER"],         "groups":["human-resources"],      "clearance":3},
         "hr-dir-kapoor":    {"oid":"oid-hr-dir-kapoor",    "name":"Rohit Kapoor",        "email":"rohit.kapoor@apollohospitals.com",   "roles":["HR_DIRECTOR"],        "groups":["human-resources"],      "clearance":4},
         "hipaa-officer":    {"oid":"oid-hipaa-officer",    "name":"Dr. Sunita Verma",    "email":"sunita.verma@apollohospitals.com",   "roles":["HIPAA_PRIVACY_OFFICER"],"groups":["compliance-legal"],   "clearance":4},

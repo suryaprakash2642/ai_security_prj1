@@ -248,4 +248,26 @@ ROLE_UI_META: dict[str, dict] = {
             {"icon": "⚠️", "label": "Expiry Alerts", "desc": "Near-expiry and recall notifications"},
         ],
     },
+    "REVENUE_CYCLE_MANAGER": {
+        "badge_color": "#F97316",
+        "clearance_color": "#F97316",
+        "permissions": [
+            {"icon": "💰", "label": "Revenue Analytics", "desc": "Claims, payments, payer mix analysis"},
+            {"icon": "📋", "label": "Claims Management", "desc": "Insurance claims processing and tracking"},
+            {"icon": "🏦", "label": "Payer Contracts", "desc": "Contract terms, reimbursement rates"},
+            {"icon": "📊", "label": "Financial Reports", "desc": "Revenue cycle KPIs and dashboards"},
+            {"icon": "💳", "label": "Payment Processing", "desc": "Collections, reconciliation, write-offs"},
+        ],
+    },
+    "CLINICAL_RESEARCHER": {
+        "badge_color": "#6366F1",
+        "clearance_color": "#6366F1",
+        "permissions": [
+            {"icon": "🔬", "label": "Research Cohorts", "desc": "Define and manage study populations"},
+            {"icon": "📊", "label": "Quality Metrics", "desc": "Clinical quality indicators and outcomes"},
+            {"icon": "🏥", "label": "Population Health", "desc": "Epidemiological and public health data"},
+            {"icon": "📈", "label": "Encounter Analytics", "desc": "Visit patterns, readmission analysis"},
+            {"icon": "🧪", "label": "Clinical Data", "desc": "De-identified labs, vitals, prescriptions"},
+        ],
+    },
 }

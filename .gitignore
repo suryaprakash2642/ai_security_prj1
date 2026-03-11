@@ -97,3 +97,17 @@ temp/
 .service_pids
 localdeps
 
+Audit-Anomaly-Detection-Layer-Specification - Copy.docx
+Audit-Anomaly-Detection-Layer-Specification.docx
+DEMO_SCRIPT.md
+MANUAL_TEST_GUIDE - Copy.md
+app.yaml
+build_and_run_local.ps1
+l4-policy-resolution/app/api/routes/admin.py
+l4-policy-resolution/tests/test_btg_protocol.py
+l4-policy-resolution/tests/test_envelope_metadata.py
+live_integration_test.sh
+pods.txt
+setup_retrieval.py
+test_30_queries.py
+test_demo_queries.py

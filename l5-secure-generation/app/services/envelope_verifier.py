@@ -17,34 +17,22 @@ from app.models.api import PermissionEnvelope
 
 logger = structlog.get_logger(__name__)
 
-# Envelope TTL in seconds — must cover full pipeline round-trip
-ENVELOPE_TTL_SECONDS = 300
+# Envelope TTL in seconds (60s per spec)
+ENVELOPE_TTL_SECONDS = 60
 
 
 def _compute_signature(envelope: PermissionEnvelope, signing_key: str) -> str:
-    """Recompute HMAC-SHA256 using the same compact payload as L4 _sign_envelope."""
-    payload: dict = {
+    """Recompute the HMAC-SHA256 signature for the envelope payload."""
+    payload = {
         "request_id": envelope.request_id,
+        "table_permissions": [tp.model_dump() for tp in envelope.table_permissions],
+        "join_restrictions": [jr.model_dump() for jr in envelope.join_restrictions],
+        "global_nl_rules": envelope.global_nl_rules,
         "resolved_at": envelope.resolved_at,
         "policy_version": envelope.policy_version,
-        "tables": [],
     }
-    for tp in sorted(envelope.table_permissions, key=lambda t: t.table_id):
-        tp_dict: dict = {
-            "id": tp.table_id,
-            "dec": tp.decision.value if hasattr(tp.decision, 'value') else tp.decision,
-            "cols": [
-                {"n": c.column_name, "v": c.visibility.value if hasattr(c.visibility, 'value') else c.visibility}
-                for c in sorted(tp.columns, key=lambda x: x.column_name)
-            ],
-            "agg": tp.aggregation_only,
-            "rows": tp.max_rows,
-        }
-        if tp.row_filters:
-            tp_dict["rf"] = sorted(tp.row_filters)
-        payload["tables"].append(tp_dict)
-    payload_bytes = json.dumps(payload, separators=(',', ':'), sort_keys=True).encode("utf-8")
-    return hmac.new(signing_key.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()
+    payload_bytes = json.dumps(payload, sort_keys=True, default=str).encode()
+    return hmac.new(signing_key.encode(), payload_bytes, hashlib.sha256).hexdigest()
 
 
 def verify(envelope: PermissionEnvelope, signing_key: str) -> tuple[bool, str]:

@@ -15,11 +15,11 @@ class Settings(BaseSettings):
     # Neo4j
     neo4j_uri: str = "neo4j://localhost:7687"
     neo4j_user: str = "policy_resolver"
-    neo4j_password: str = ""  # Set via NEO4J_PASSWORD
+    neo4j_password: str = "password"
 
     # Security & Signatures
     envelope_ttl_seconds: int = 60
-    envelope_signing_key: str = ""  # Set via ENVELOPE_SIGNING_KEY
+    context_signing_key: str = "dev-context-signing-key-minimum-32-chars!"
 
 
 def get_settings() -> Settings:

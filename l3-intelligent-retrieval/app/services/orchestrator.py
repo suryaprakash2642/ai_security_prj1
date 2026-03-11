@@ -271,6 +271,29 @@ class RetrievalOrchestrator:
             latency_ms=round(metadata.total_latency_ms, 2),
         )
 
+        # Debug: log schema summary so downstream issues can be diagnosed
+        logger.info(
+            "retrieval_schema_debug",
+            request_id=request_id,
+            table_ids=[t.table_id for t in filtered_tables],
+            tables_detail=[
+                {
+                    "table_id": t.table_id,
+                    "columns": [c.name for c in (t.visible_columns or [])],
+                    "row_filters": t.row_filters or [],
+                    "relevance_score": round(getattr(t, "relevance_score", 0), 4),
+                }
+                for t in filtered_tables
+            ],
+            join_edges=[
+                {
+                    "from": f"{e.source_table}.{e.source_column}",
+                    "to": f"{e.target_table}.{e.target_column}",
+                }
+                for e in (join_graph.edges if join_graph else [])
+            ],
+        )
+
         # Spec §16 step 12: log retrieval metrics to audit system (Fix 5)
         log_retrieval_metrics(
             request_id=request_id,

@@ -36,6 +36,13 @@ spec:
                 name: sentinelsql-config
             - secretRef:
                 name: sentinelsql-secrets
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 18
           readinessProbe:
             httpGet:
               path: /health

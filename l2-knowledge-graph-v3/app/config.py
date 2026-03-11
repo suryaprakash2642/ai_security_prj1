@@ -31,21 +31,22 @@ class Settings(BaseSettings):
     # Neo4j
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_read_user: str = "neo4j"
-    neo4j_read_password: str = ""  # Set via NEO4J_READ_PASSWORD
+    neo4j_read_password: str = "changeme"
     neo4j_write_user: str = "neo4j"
-    neo4j_write_password: str = ""  # Set via NEO4J_WRITE_PASSWORD
+    neo4j_write_password: str = "changeme"
     neo4j_database: str = "neo4j"
     neo4j_max_pool_size: int = 50
     neo4j_encrypted: bool = False
     neo4j_ca_cert_path: str = ""  # Path to CA cert for TLS; empty = trust system CAs
 
-    # PostgreSQL audit — set via PG_AUDIT_DSN env var
-    pg_audit_dsn: str = ""
+    # PostgreSQL audit
+    pg_audit_dsn: str = "postgresql+asyncpg://l2_admin:changeme123@localhost:5432/l2_audit"
+    pg_audit_ca_cert_path: str = ""
     pg_pool_min: int = 5
     pg_pool_max: int = 20
 
-    # pgvector embeddings — set via PG_VECTOR_DSN env var
-    pg_vector_dsn: str = ""
+    # pgvector embeddings
+    pg_vector_dsn: str = "postgresql+asyncpg://l2_admin:changeme123@localhost:5432/l2_audit"
 
     # Redis cache
     redis_url: str = "redis://localhost:6379/0"
@@ -59,7 +60,8 @@ class Settings(BaseSettings):
 
     # Auth
     service_token_secret: str = Field(
-        default="",  # Set via SERVICE_TOKEN_SECRET env var
+        default="dev-secret-change-in-production-min-32-chars",
+        min_length=32,
     )
     allowed_service_ids: str = "l1-identity,l3-retrieval,l4-policy,l6-validation,l8-audit"
 

@@ -13,11 +13,11 @@ class Settings(BaseSettings):
     # Neo4j for Gate 2 classification lookups
     neo4j_uri: str = "neo4j://localhost:7687"
     neo4j_user: str = "neo4j"
-    neo4j_password: str = ""  # Set via NEO4J_PASSWORD
+    neo4j_password: str = "password"
 
     # Security
-    envelope_signing_key: str = ""  # Set via ENVELOPE_SIGNING_KEY
-    service_token_secret: str = ""  # Set via SERVICE_TOKEN_SECRET
+    envelope_signing_key: str = "dev-context-signing-key-32-chars-min"
+    service_token_secret: str = "dev-secret-change-in-production-min-32-chars-xx"
 
     # Validation config
     max_subquery_depth: int = 3

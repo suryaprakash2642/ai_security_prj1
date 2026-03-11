@@ -14,9 +14,9 @@ class Settings(BaseSettings):
     service_port: int = 8700
     log_level: str = "INFO"
 
-    # Signing keys — set via ENVELOPE_SIGNING_KEY / SERVICE_TOKEN_SECRET env vars
-    envelope_signing_key: str = ""
-    service_token_secret: str = ""
+    # Signing keys
+    envelope_signing_key: str = "dev-context-signing-key-32-chars-min"
+    service_token_secret: str = "dev-secret-change-in-production-min-32-chars-xx"
 
     # Resource limits
     query_timeout_seconds: int = 30
@@ -36,19 +36,19 @@ class Settings(BaseSettings):
     mock_execution: bool = True
     mock_execution_latency_ms: int = 50
 
-    # Aiven PostgreSQL — set via POSTGRES_HOST / POSTGRES_USER / POSTGRES_PASSWORD env vars
-    postgres_host: str = ""
+    # Aiven PostgreSQL
+    postgres_host: str = "pg-hospital-system-hospital-syatem.k.aivencloud.com"
     postgres_port: int = 21400
-    postgres_user: str = ""
+    postgres_user: str = "avnadmin"
     postgres_password: str = ""
     postgres_dbname_analytics: str = "apollo_analytics"
     postgres_dbname_financial: str = "apollo_financial"
     postgres_sslmode: str = "require"
 
-    # Aiven MySQL — set via MYSQL_HOST / MYSQL_USER / MYSQL_PASSWORD env vars
-    mysql_host: str = ""
+    # Aiven MySQL
+    mysql_host: str = "mysql-hospital-system-hospital-syatem.k.aivencloud.com"
     mysql_port: int = 21400
-    mysql_user: str = ""
+    mysql_user: str = "avnadmin"
     mysql_password: str = ""
     mysql_dbname_his: str = "ApolloHIS"
     mysql_dbname_hr: str = "ApolloHR"

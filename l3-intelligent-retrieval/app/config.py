@@ -39,6 +39,15 @@ def _env(key: str, default: Any = None) -> Any:
     return os.environ.get(f"L3_{key}", default)
 
 
+def _env_first(keys: list[str], default: Any = None) -> Any:
+    """Return first non-empty env var from a list of exact names."""
+    for k in keys:
+        v = os.environ.get(k)
+        if v not in (None, ""):
+            return v
+    return default
+
+
 class Settings(BaseModel):
     """Validated application settings."""
 
@@ -156,14 +165,32 @@ def load_settings() -> Settings:
     emb = raw.get("embedding", {})
     flat["embedding_primary_provider"] = _env("EMBEDDING_PRIMARY", emb.get("primary_provider", "voyage"))
     flat["embedding_fallback_provider"] = _env("EMBEDDING_FALLBACK", emb.get("fallback_provider", "openai"))
-    flat["embedding_voyage_api_key"] = _env("EMBEDDING_VOYAGE_API_KEY", emb.get("voyage_api_key", ""))
+    flat["embedding_voyage_api_key"] = _env(
+        "EMBEDDING_VOYAGE_API_KEY",
+        _env_first(["VOYAGE_API_KEY", "EMBEDDING_VOYAGE_API_KEY"], emb.get("voyage_api_key", "")),
+    )
     flat["embedding_voyage_model"] = emb.get("voyage_model", "voyage-3-large")
-    flat["embedding_openai_api_key"] = _env("EMBEDDING_OPENAI_API_KEY", emb.get("openai_api_key", ""))
+    flat["embedding_openai_api_key"] = _env(
+        "EMBEDDING_OPENAI_API_KEY",
+        _env_first(["OPENAI_API_KEY", "EMBEDDING_OPENAI_API_KEY"], emb.get("openai_api_key", "")),
+    )
     flat["embedding_openai_model"] = emb.get("openai_model", "text-embedding-3-large")
-    flat["embedding_azure_api_key"] = _env("EMBEDDING_AZURE_API_KEY", emb.get("azure_api_key", ""))
-    flat["embedding_azure_endpoint"] = _env("EMBEDDING_AZURE_ENDPOINT", emb.get("azure_endpoint", ""))
-    flat["embedding_azure_deployment"] = emb.get("azure_deployment", "text-embedding-ada-002")
-    flat["embedding_azure_api_version"] = emb.get("azure_api_version", "2024-02-01")
+    flat["embedding_azure_api_key"] = _env(
+        "EMBEDDING_AZURE_API_KEY",
+        _env_first(["AZURE_AI_API_KEY", "AZURE_OPENAI_API_KEY"], emb.get("azure_api_key", "")),
+    )
+    flat["embedding_azure_endpoint"] = _env(
+        "EMBEDDING_AZURE_ENDPOINT",
+        _env_first(["AZURE_AI_ENDPOINT", "AZURE_OPENAI_ENDPOINT"], emb.get("azure_endpoint", "")),
+    )
+    flat["embedding_azure_deployment"] = _env(
+        "EMBEDDING_AZURE_DEPLOYMENT",
+        _env_first(["AZURE_EMBEDDING_DEPLOYMENT"], emb.get("azure_deployment", "text-embedding-ada-002")),
+    )
+    flat["embedding_azure_api_version"] = _env(
+        "EMBEDDING_AZURE_API_VERSION",
+        _env_first(["AZURE_OPENAI_API_VERSION"], emb.get("azure_api_version", "2024-02-01")),
+    )
     flat["embedding_dimensions"] = int(emb.get("dimensions", 1536))
     flat["embedding_cache_ttl"] = int(emb.get("cache_ttl_seconds", 900))
     flat["embedding_cache_max_entries"] = int(emb.get("cache_max_entries", 10000))

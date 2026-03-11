@@ -95,14 +95,17 @@ class Neo4jManager:
             reraise=True,
         ):
             with attempt:
-                if attempt.retry_state.attempt_number > 1:
+                try:
+                    await self._read_driver.verify_connectivity()
+                    await self._write_driver.verify_connectivity()
+                except Exception as exc:
                     logger.warning(
                         "neo4j_connect_retry",
                         attempt=attempt.retry_state.attempt_number,
                         uri=self._settings.neo4j_uri,
+                        error=repr(exc),
                     )
-                await self._read_driver.verify_connectivity()
-                await self._write_driver.verify_connectivity()
+                    raise
         logger.info("neo4j_connected", uri=self._settings.neo4j_uri)
 
     async def close(self) -> None:

@@ -10,6 +10,7 @@ from typing import Any
 
 import structlog
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -26,6 +27,8 @@ class AuditRepository:
         self._engine: AsyncEngine | None = None
         self._session_factory: sessionmaker | None = None
         self._settings = settings
+        self._api_access_log_ready: bool = False
+        self._api_access_log_disabled: bool = False
 
     async def connect(self) -> None:
         dsn = self._settings.pg_audit_dsn
@@ -36,10 +39,11 @@ class AuditRepository:
         is_remote = "localhost" not in clean_dsn and "127.0.0.1" not in clean_dsn
         if is_remote:
             # For cloud-hosted PostgreSQL (Aiven, Timescale, etc.), use SSL.
-            # Check for a pinned CA cert first; fall back to permissive SSL.
-            _CA_CERT = Path(__file__).resolve().parent.parent.parent / "certs" / "timescale-ca.pem"
-            if _CA_CERT.exists():
-                ssl_ctx = ssl.create_default_context(cafile=str(_CA_CERT))
+            # Use pinned CA only when explicitly configured; otherwise fall back
+            # to permissive SSL for environments with self-signed chains.
+            ca_path = (self._settings.pg_audit_ca_cert_path or "").strip()
+            if ca_path:
+                ssl_ctx = ssl.create_default_context(cafile=ca_path)
             else:
                 ssl_ctx = ssl.create_default_context()
                 ssl_ctx.check_hostname = False
@@ -58,6 +62,7 @@ class AuditRepository:
         self._session_factory = sessionmaker(
             self._engine, class_=AsyncSession, expire_on_commit=False
         )
+        await self._ensure_api_access_log_table()
         logger.info("audit_db_connected")
 
     async def close(self) -> None:
@@ -401,19 +406,83 @@ class AuditRepository:
         latency_ms: float,
     ) -> None:
         """Log an API access event to the api_access_log table."""
+        if self._api_access_log_disabled:
+            return
+
         async with self._get_session() as session:
-            await session.execute(
-                text("""
-                    INSERT INTO api_access_log
-                        (service_id, endpoint, method, status_code, latency_ms)
-                    VALUES (:sid, :ep, :method, :sc, :lat)
-                """),
-                {
-                    "sid": service_id,
-                    "ep": endpoint,
-                    "method": method,
-                    "sc": status_code,
-                    "lat": latency_ms,
-                },
-            )
-            await session.commit()
+            params = {
+                "sid": service_id,
+                "ep": endpoint,
+                "method": method,
+                "sc": status_code,
+                "lat": latency_ms,
+            }
+            try:
+                await session.execute(
+                    text("""
+                        INSERT INTO api_access_log
+                            (service_id, endpoint, method, status_code, latency_ms)
+                        VALUES (:sid, :ep, :method, :sc, :lat)
+                    """),
+                    params,
+                )
+                await session.commit()
+            except ProgrammingError as exc:
+                msg = str(exc).lower()
+                if "api_access_log" in msg and "does not exist" in msg:
+                    await session.rollback()
+                    await self._ensure_api_access_log_table()
+                    try:
+                        await session.execute(
+                            text("""
+                                INSERT INTO api_access_log
+                                    (service_id, endpoint, method, status_code, latency_ms)
+                                VALUES (:sid, :ep, :method, :sc, :lat)
+                            """),
+                            params,
+                        )
+                        await session.commit()
+                        return
+                    except Exception as retry_exc:
+                        await session.rollback()
+                        self._api_access_log_disabled = True
+                        logger.warning(
+                            "api_access_log_disabled",
+                            reason="create_or_retry_failed",
+                            error=str(retry_exc),
+                        )
+                        return
+                raise
+
+    async def _ensure_api_access_log_table(self) -> None:
+        """Ensure API access audit table exists in the connected audit DB."""
+        if self._api_access_log_ready or self._api_access_log_disabled:
+            return
+
+        try:
+            async with self._get_session() as session:
+                await session.execute(
+                    text("""
+                        CREATE TABLE IF NOT EXISTS api_access_log (
+                            id BIGSERIAL PRIMARY KEY,
+                            service_id VARCHAR(100) NOT NULL,
+                            endpoint VARCHAR(200) NOT NULL,
+                            method VARCHAR(10) NOT NULL,
+                            status_code INT NOT NULL,
+                            latency_ms FLOAT NOT NULL,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )
+                    """)
+                )
+                await session.execute(
+                    text("CREATE INDEX IF NOT EXISTS idx_api_access_time ON api_access_log (created_at DESC)")
+                )
+                await session.execute(
+                    text("CREATE INDEX IF NOT EXISTS idx_api_access_service ON api_access_log (service_id)")
+                )
+                await session.commit()
+                self._api_access_log_ready = True
+                logger.info("api_access_log_ready")
+        except Exception as exc:
+            self._api_access_log_disabled = True
+            logger.warning("api_access_log_setup_failed", error=str(exc))

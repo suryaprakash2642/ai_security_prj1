@@ -15,12 +15,12 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-ENVELOPE_TTL_SECONDS = 300
+ENVELOPE_TTL_SECONDS = 60
 
 
 def verify(envelope_dict: dict, signing_key: str,
            skip_in_dev: bool = True) -> tuple[bool, str]:
-    """Verify envelope HMAC signature using same compact payload as L4 _sign_envelope.
+    """Verify envelope HMAC signature.
 
     Returns (is_valid, reason). reason is "" on success.
     """
@@ -32,32 +32,18 @@ def verify(envelope_dict: dict, signing_key: str,
             return True, ""
         return False, "Missing envelope signature"
 
-    # Recompute using the same compact format as L4's _sign_envelope
-    tables = []
-    for tp in sorted(envelope_dict.get("table_permissions", []), key=lambda t: t.get("table_id", "")):
-        tp_dict = {
-            "id": tp.get("table_id", ""),
-            "dec": tp.get("decision", ""),
-            "cols": [
-                {"n": c.get("column_name", ""), "v": c.get("visibility", "")}
-                for c in sorted(tp.get("columns", []), key=lambda x: x.get("column_name", ""))
-            ],
-            "agg": tp.get("aggregation_only", False),
-            "rows": tp.get("max_rows"),
-        }
-        if tp.get("row_filters"):
-            tp_dict["rf"] = sorted(tp["row_filters"])
-        tables.append(tp_dict)
-
+    # Recompute signature over canonical payload
     payload = {
         "request_id": envelope_dict.get("request_id", ""),
+        "table_permissions": envelope_dict.get("table_permissions", []),
+        "join_restrictions": envelope_dict.get("join_restrictions", []),
+        "global_nl_rules": envelope_dict.get("global_nl_rules", []),
         "resolved_at": envelope_dict.get("resolved_at"),
         "policy_version": envelope_dict.get("policy_version", 1),
-        "tables": tables,
     }
-    payload_bytes = json.dumps(payload, separators=(',', ':'), sort_keys=True).encode("utf-8")
+    payload_bytes = json.dumps(payload, sort_keys=True, default=str).encode()
     expected = hmac.new(
-        signing_key.encode("utf-8"), payload_bytes, hashlib.sha256
+        signing_key.encode(), payload_bytes, hashlib.sha256
     ).hexdigest()
 
     if not hmac.compare_digest(expected, signature):

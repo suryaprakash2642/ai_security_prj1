@@ -12,6 +12,7 @@ Executes the 8-step pipeline:
 
 from __future__ import annotations
 
+import re
 import time
 
 import structlog
@@ -31,6 +32,34 @@ from app.services import (
 )
 
 logger = structlog.get_logger(__name__)
+
+
+def _extract_sql_tables(sql: str) -> set[str]:
+    """Extract table names referenced in FROM/JOIN clauses (best-effort)."""
+    tables: set[str] = set()
+    for m in re.finditer(r"\b(?:from|join)\s+([a-zA-Z_\"`][\w\.\"`]*)", sql, flags=re.IGNORECASE):
+        raw = m.group(1).strip().strip('"`')
+        if raw:
+            tables.add(raw.lower())
+    return tables
+
+
+def _allowed_table_tokens(schema: FilteredSchema) -> set[str]:
+    """Build normalized allowed table identifiers from filtered schema."""
+    allowed: set[str] = set()
+    for t in schema.tables:
+        tid = (t.table_id or "").lower()
+        tname = (t.table_name or "").lower()
+        if tid:
+            allowed.add(tid)
+            parts = [p for p in tid.split('.') if p]
+            if parts:
+                allowed.add(parts[-1])
+            if len(parts) >= 2:
+                allowed.add('.'.join(parts[-2:]))
+        if tname:
+            allowed.add(tname)
+    return allowed
 
 
 async def run(request: GenerationRequest, settings: Settings) -> GenerationResponse:
@@ -83,6 +112,14 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
     )
 
     # ── Step 5: LLM call ──────────────────────────────────────────────────
+    log.info(
+        "llm_prompt_assembled",
+        request_id=request.request_id,
+        tables_included=assembled.tables_included,
+        tables_truncated=assembled.tables_truncated,
+        system_prompt=assembled.system_prompt,
+        user_message=assembled.user_message,
+    )
     try:
         llm_resp = await llm_client.generate(
             system_prompt=assembled.system_prompt,
@@ -137,6 +174,23 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
             request_id=request.request_id,
             status=GenerationStatus.GENERATION_FAILED,
             generation_metadata=metadata,
+        )
+
+    # Hard safety gate: generated SQL must only reference tables in filtered_schema.
+    sql_tables = _extract_sql_tables(parse_result.sql or "")
+    allowed = _allowed_table_tokens(request.filtered_schema)
+    unknown = [t for t in sql_tables if t not in allowed]
+    if unknown:
+        log.warning("generated_sql_references_unknown_tables", unknown_tables=unknown)
+        return GenerationResponse(
+            request_id=request.request_id,
+            status=GenerationStatus.CANNOT_ANSWER,
+            cannot_answer_reason=(
+                "Generated SQL referenced tables outside the authorized schema: "
+                + ", ".join(sorted(unknown))
+            ),
+            generation_metadata=metadata,
+            permission_envelope=request.permission_envelope,
         )
 
     log.info("SQL generated successfully",

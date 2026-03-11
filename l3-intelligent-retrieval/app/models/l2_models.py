@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class L2TableInfo(BaseModel):
@@ -52,11 +52,31 @@ class L2ForeignKey(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     source_table_fqn: str = ""
-    source_column: str
-    target_table_fqn: str = ""
+    source_column_fqn: str = ""
+    source_column: str = Field(default="", validation_alias=AliasChoices("source_column", "source_column_name"))
+    target_table_fqn: str = Field(default="", validation_alias=AliasChoices("target_table_fqn", "target_table"))
     target_table: str = ""
-    target_column: str = ""
+    target_column_fqn: str = ""
+    target_column: str = Field(default="", validation_alias=AliasChoices("target_column", "target_column_name"))
     constraint_name: str = ""
+
+    @model_validator(mode="after")
+    def _derive_missing_fields(self) -> "L2ForeignKey":
+        # Populate source/target table + column names from FQNs when L2 returns
+        # only *_fqn and *_name fields.
+        if not self.source_table_fqn and self.source_column_fqn and "." in self.source_column_fqn:
+            self.source_table_fqn = ".".join(self.source_column_fqn.split(".")[:-1])
+
+        if not self.source_column and self.source_column_fqn:
+            self.source_column = self.source_column_fqn.split(".")[-1]
+
+        if not self.target_column and self.target_column_fqn:
+            self.target_column = self.target_column_fqn.split(".")[-1]
+
+        if not self.target_table and self.target_table_fqn:
+            self.target_table = self.target_table_fqn
+
+        return self
 
 
 class L2RoleDomainAccess(BaseModel):

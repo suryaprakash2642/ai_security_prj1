@@ -76,7 +76,6 @@ class PermissionEnvelope(BaseModel):
     global_nl_rules: list[str] = Field(default_factory=list)
     resolved_at: str = ""
     policy_version: int = 0
-    signature: str = ""
 
     def get_table_permission(self, table_id: str) -> TablePermission | None:
         """Look up permission for a specific table."""

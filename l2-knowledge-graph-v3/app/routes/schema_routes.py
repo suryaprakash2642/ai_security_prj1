@@ -98,6 +98,24 @@ async def search_tables(
     return APIResponse(data=[t.model_dump() for t in tables], meta={"count": len(tables)})
 
 
+@router.get("/roles/domain-access", response_model=APIResponse)
+async def get_role_domain_access(
+    roles: str = Query(..., description="Comma-separated role names"),
+    include_inherited: bool = Query(True, description="Include inherited role policies"),
+    _identity: ServiceIdentity = Depends(require_permission("read_policy")),
+):
+    """Return mapping of role name -> list of accessible domains."""
+    container = get_container()
+    role_list = [r.strip() for r in roles.split(",") if r.strip()]
+    if not role_list:
+        return APIResponse(success=False, error="At least one role is required")
+
+    role_map = await container.graph_reader.get_role_domain_access(
+        role_list, include_inherited=include_inherited
+    )
+    return APIResponse(data=role_map, meta={"count": len(role_map), "roles": role_list})
+
+
 @router.get("/tables/{table_fqn}/info", response_model=APIResponse)
 async def get_table_info(
     table_fqn: str,
