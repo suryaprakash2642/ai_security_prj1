@@ -58,6 +58,14 @@ Thumbs.db
 # Local deployment folder — contains real cluster credentials, never commit
 local_dep/
 
+# Private keys
+*.pem
+*_private.pem
+*_private_key*
+*.key
+*.p12
+*.pfx
+
 # IDEs and Editors
 .vscode/
 .idea/
