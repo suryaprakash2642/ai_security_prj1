@@ -51,11 +51,20 @@ SCHEMA USAGE RULES:
 15. Prefer SUM/COUNT aggregations over raw row scans for "how many" or "total" questions.\
 """
 
+# Short dialect names used in the system prompt role declaration.
+_DIALECT_NAMES = {
+    SQLDialect.POSTGRESQL: "PostgreSQL",
+    SQLDialect.MYSQL: "MySQL",
+    SQLDialect.TSQL: "Microsoft SQL Server T-SQL",
+    SQLDialect.ORACLE: "Oracle PL/SQL",
+}
+
+# Detailed syntax hints appended to the question footer in the user message.
 _DIALECT_HINTS = {
-    SQLDialect.POSTGRESQL: "PostgreSQL. Use LIMIT N, COALESCE(), standard SQL.",
-    SQLDialect.MYSQL: "MySQL. Use LIMIT N, IFNULL(), CURDATE(), DATE_SUB(CURDATE(), INTERVAL N DAY). For INTERVAL always include the unit keyword: INTERVAL 30 DAY, INTERVAL 6 MONTH — never write INTERVAL '200' without a unit. Do NOT use date_trunc or PostgreSQL-style INTERVAL '30 days'. Only reference tables and columns provided in the schema — do NOT invent tables like 'units' or 'beds'.",
-    SQLDialect.TSQL: "Microsoft SQL Server T-SQL. Use TOP N, bracket-quoted names, ISNULL().",
-    SQLDialect.ORACLE: "Oracle PL/SQL. Use FETCH FIRST N ROWS ONLY, NVL(), SYSDATE.",
+    SQLDialect.POSTGRESQL: "Use LIMIT N, COALESCE(), standard SQL.",
+    SQLDialect.MYSQL: "Use LIMIT N, IFNULL(), CURDATE(), DATE_SUB(CURDATE(), INTERVAL N DAY). For INTERVAL always include the unit keyword: INTERVAL 30 DAY, INTERVAL 6 MONTH — never write INTERVAL '200' without a unit. Do NOT use date_trunc or PostgreSQL-style INTERVAL '30 days'. Only reference tables and columns provided in the schema — do NOT invent tables like 'units' or 'beds'.",
+    SQLDialect.TSQL: "Use TOP N, bracket-quoted names, ISNULL().",
+    SQLDialect.ORACLE: "Use FETCH FIRST N ROWS ONLY, NVL(), SYSDATE.",
 }
 
 
@@ -141,7 +150,7 @@ def assemble_prompt(
             max_rows = tp.max_rows
 
     system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
-        dialect_hint=_DIALECT_HINTS.get(dialect, "PostgreSQL"),
+        dialect_hint=_DIALECT_NAMES.get(dialect, "PostgreSQL"),
         max_rows=max_rows,
     )
 
@@ -200,10 +209,14 @@ def assemble_prompt(
     schema_section = "\n".join(schema_lines)
 
     # ── 4. Question section ────────────────────────────────────────────────
-    dialect_name = dialect.value.upper()  # e.g. "MYSQL", "POSTGRESQL"
+    dialect_name = _DIALECT_NAMES.get(dialect, "PostgreSQL")
+    dialect_extra = _DIALECT_HINTS.get(dialect, "")
+    footer = f"Generate a single valid {dialect_name} SELECT query using ONLY the tables and columns above."
+    if dialect_extra:
+        footer += f" {dialect_extra}"
     question_section = (
         f"=== USER QUESTION ===\n{sanitized_question}\n=== END USER QUESTION ===\n\n"
-        f"Generate a single valid {dialect_name} SELECT query using ONLY the tables and columns above."
+        f"{footer}"
     )
 
     # ── Assemble user message ─────────────────────────────────────────────
