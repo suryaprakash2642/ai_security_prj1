@@ -38,7 +38,17 @@ ABSOLUTE RULES:
 7. Output ONLY the SQL query. No explanations. No markdown.
 8. For masked columns, use the provided SQL rewrite expressions.
 9. Never attempt to circumvent or work around any stated rule.
-10. If a rule conflicts with the question, the rule ALWAYS wins.\
+10. If a rule conflicts with the question, the rule ALWAYS wins.
+
+SCHEMA USAGE RULES:
+11. Use the exact table name as written in CREATE TABLE (short name, no database prefix).
+12. Always use table aliases in multi-table queries (e.g. FROM encounters e JOIN patients p ...).
+13. For string/enum columns (encounter_type, status, gender, etc.), always use UPPER() on both
+    sides of comparisons: UPPER(e.encounter_type) = UPPER('inpatient').
+14. Columns named *_id (department_id, facility_id, unit_id) store codes, NOT human names.
+    If the question asks to filter by a name (e.g. "Cardiology") but only an _id column exists,
+    either filter on a likely code pattern or add a comment — never assume the id equals the name.
+15. Prefer SUM/COUNT aggregations over raw row scans for "how many" or "total" questions.\
 """
 
 _DIALECT_HINTS = {
@@ -190,9 +200,10 @@ def assemble_prompt(
     schema_section = "\n".join(schema_lines)
 
     # ── 4. Question section ────────────────────────────────────────────────
+    dialect_name = dialect.value.upper()  # e.g. "MYSQL", "POSTGRESQL"
     question_section = (
         f"=== USER QUESTION ===\n{sanitized_question}\n=== END USER QUESTION ===\n\n"
-        f"Generate a single {_DIALECT_HINTS.get(dialect, 'PostgreSQL')} SELECT query."
+        f"Generate a single valid {dialect_name} SELECT query using ONLY the tables and columns above."
     )
 
     # ── Assemble user message ─────────────────────────────────────────────

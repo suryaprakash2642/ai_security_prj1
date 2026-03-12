@@ -768,7 +768,7 @@ async function runPipeline() {
   const filteredSchemaForL5 = {
     tables: l3Tables.map(t => ({
       table_id: t.table_id,
-      table_name: t.table_name || t.table_id,
+      table_name: t.table_name || t.table_id.split('.').pop() || t.table_id,
       domain: (t.domain_tags || [])[0] || '',
       nl_description: t.description || '',
       relevance_score: t.relevance_score || 0.5,
