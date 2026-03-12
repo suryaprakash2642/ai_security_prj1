@@ -36,7 +36,7 @@ intent_scoring:
     column_match_boost: 0.20
     description_match_boost: 0.10
   AGGREGATION:
-    fact_table_boost: 0.15
+    fact_table_boost: 0.35       # raised from 0.15 — summary tables must beat transactional anchors
     dimension_table_boost: 0.10
   COMPARISON:
     sibling_table_boost: 0.10

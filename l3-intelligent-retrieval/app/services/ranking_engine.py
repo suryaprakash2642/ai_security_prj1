@@ -70,10 +70,25 @@ class RankingEngine:
                     domain_score = 0.5
             c.domain_affinity_score = domain_score
 
-            # Universal anchor boost
-            if c.table_name.lower() in universal_anchors:
+            # Universal anchor boost — suppressed for aggregate/trend/comparison
+            # intents so analytics/summary tables can outrank transactional anchors.
+            _aggregate_intents = (
+                QueryIntent.AGGREGATION,
+                QueryIntent.TREND,
+                QueryIntent.COMPARISON,
+            )
+            if c.table_name.lower() in universal_anchors and intent.intent not in _aggregate_intents:
                 c.domain_affinity_score = max(c.domain_affinity_score, 0.8)
                 c.domain_affinity_score += anchor_boost
+
+            # For aggregate/trend queries, boost domain_affinity of fact/summary tables
+            # so they rank above raw transactional tables.
+            if intent.intent in _aggregate_intents:
+                name_lower = c.table_name.lower()
+                _fact_keywords = ("summary", "summaries", "stats", "statistics",
+                                   "metric", "metrics", "analytics", "fact_", "_facts")
+                if any(kw in name_lower for kw in _fact_keywords):
+                    c.domain_affinity_score = min(c.domain_affinity_score + 0.35, 1.0)
 
             # Intent-specific scoring
             intent_score = self._compute_intent_score(c, intent)
@@ -116,9 +131,12 @@ class RankingEngine:
         desc = candidate.description.lower()
 
         if intent.intent == QueryIntent.AGGREGATION:
-            # Boost fact-like tables
-            if any(kw in name for kw in ["fact_", "summary", "stats", "metric"]):
-                score += rules.get("fact_table_boost", 0.15)
+            # Boost fact/summary/analytics tables — include plural forms like
+            # 'summaries' which don't contain 'summary' as a substring.
+            _fact_kws = ("fact_", "_facts", "summary", "summaries",
+                         "stats", "statistics", "metric", "metrics", "analytics")
+            if any(kw in name for kw in _fact_kws):
+                score += rules.get("fact_table_boost", 0.35)
             if any(kw in name for kw in ["dim_", "lookup", "reference"]):
                 score += rules.get("dimension_table_boost", 0.10)
 
