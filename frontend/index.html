@@ -689,18 +689,21 @@ async function runPipeline() {
   // Strict security contract: L3/L4 must provide a signed permission envelope.
   const allL3Tables = l3Result.filtered_schema || [];
   const MYSQL_DBS = ['apollohis', 'apollohr'];
-  const PG_DBS = ['apollo_analytics', 'apollo_financial'];
+  const PG_DBS = ['apollo_analytics', 'apollo_financial', 'apollo_emr'];
 
   // ── Detect dialect & target DB from ALL retrieved tables first ──
-  const dbCounts = {};
+  // Use MAX relevance per DB (not sum) so the single most-relevant table
+  // wins — prevents 7 low-score MySQL tables swamping 1 high-score PG table.
+  const dbMaxScores = {};
   for (const t of allL3Tables) {
     const dbPart = (t.table_id || '').split('.')[0].toLowerCase();
-    dbCounts[dbPart] = (dbCounts[dbPart] || 0) + (t.relevance_score || 1);
+    const score = t.relevance_score || 0;
+    if (score > (dbMaxScores[dbPart] || 0)) dbMaxScores[dbPart] = score;
   }
   let detectedDb = '';
   let detectedDialect = dialect === 'auto' ? 'postgresql' : dialect;
   let maxScore = 0;
-  for (const [db, score] of Object.entries(dbCounts)) {
+  for (const [db, score] of Object.entries(dbMaxScores)) {
     if (score > maxScore) {
       maxScore = score;
       detectedDb = db;
@@ -715,7 +718,7 @@ async function runPipeline() {
     const allowed = dialect === 'mysql' ? MYSQL_DBS : PG_DBS;
     let bestDb = '';
     let bestScore = -1;
-    for (const [db, score] of Object.entries(dbCounts)) {
+    for (const [db, score] of Object.entries(dbMaxScores)) {
       if (allowed.includes(db) && score > bestScore) {
         bestDb = db;
         bestScore = score;
@@ -734,7 +737,7 @@ async function runPipeline() {
   if (!detectedDb && l3Tables.length) {
     detectedDb = (l3Tables[0].table_id || '').split('.')[0] || 'mock';
   }
-  console.log('[Pipeline] Detected DB:', detectedDb, 'Dialect:', detectedDialect, 'Counts:', dbCounts);
+  console.log('[Pipeline] Detected DB:', detectedDb, 'Dialect:', detectedDialect, 'MaxScores:', dbMaxScores);
 
   const permissionEnvelope = l3Result.permission_envelope || l3Res.data?.permission_envelope;
 
