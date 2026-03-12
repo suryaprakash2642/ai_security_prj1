@@ -208,7 +208,10 @@ def load_settings() -> Settings:
     flat["redis_url"] = _env("REDIS_URL", redis.get("url", "redis://localhost:6379/1"))
 
     pgv = raw.get("pgvector", {})
-    flat["pgvector_dsn"] = _env("PGVECTOR_DSN", pgv.get("dsn", ""))
+    flat["pgvector_dsn"] = _env(
+        "PGVECTOR_DSN",
+        _env_first(["PG_VECTOR_DSN", "PGVECTOR_DSN"], pgv.get("dsn", "")),
+    )
     flat["pgvector_ssl"] = pgv.get("ssl", False)
 
     return Settings(**{k: v for k, v in flat.items() if v is not None})
