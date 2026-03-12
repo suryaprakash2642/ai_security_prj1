@@ -197,7 +197,8 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
              dialect=request.dialect.value,
              latency_ms=f"{total_latency_ms:.1f}",
              model=llm_resp.model,
-             tables_included=assembled.tables_included)
+             tables_included=assembled.tables_included,
+             generated_sql=parse_result.sql)
 
     return GenerationResponse(
         request_id=request.request_id,

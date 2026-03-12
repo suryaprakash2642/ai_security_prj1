@@ -48,7 +48,15 @@ SCHEMA USAGE RULES:
 14. Columns named *_id (department_id, facility_id, unit_id) store codes, NOT human names.
     If the question asks to filter by a name (e.g. "Cardiology") but only an _id column exists,
     either filter on a likely code pattern or add a comment — never assume the id equals the name.
-15. Prefer SUM/COUNT aggregations over raw row scans for "how many" or "total" questions.\
+15. Prefer SUM/COUNT aggregations over raw row scans for "how many" or "total" questions.
+16. When multiple tables contain similar metrics with different column names (e.g., `avg_length_of_stay`
+    vs `avg_los`), ALWAYS choose the table whose column name most closely or exactly matches the metric
+    term used in the question. `avg_length_of_stay` is the preferred column for any question about
+    'average length of stay' over a shorter alias like `avg_los`.
+17. When filtering a medical-specialty or disease column using LIKE, use a 5-character stem to match
+    all variants of the term. Examples: 'cardiac' or 'cardiology' → `LIKE '%CARDI%'` (matches
+    'Cardiology', 'Cardiac', 'Cardiovascular'); 'oncology'/'cancer' → `LIKE '%ONCO%'`;
+    'neurology' → `LIKE '%NEURO%'`. Never use the full word as the sole LIKE pattern.\
 """
 
 # Short dialect names used in the system prompt role declaration.
