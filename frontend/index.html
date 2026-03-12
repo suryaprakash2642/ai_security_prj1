@@ -694,12 +694,40 @@ async function runPipeline() {
   // ── Detect dialect & target DB from ALL retrieved tables first ──
   // Use MAX relevance per DB (not sum) so the single most-relevant table
   // wins — prevents 7 low-score MySQL tables swamping 1 high-score PG table.
+  //
+  // Aggregate signal: if the question contains aggregate keywords, boost
+  // analytics/PG tables so that a transactional anchor (patients, encounters)
+  // with a high universal-anchor score doesn't override a summary table.
+  const AGGREGATE_KEYWORDS = [
+    'average', 'avg', 'total', 'sum', 'count', 'how many', 'number of',
+    'rate', 'ratio', 'percentage', 'percent', 'mean', 'median',
+    'length of stay', 'readmission', 'occupancy', 'utilization',
+    'across all', 'breakdown', 'distribution', 'statistics', 'summary',
+  ];
+  const ANALYTICS_DBS = ['apollo_analytics', 'apollo_financial'];
+  const qLower = question.toLowerCase();
+  const hasAggregateSignal = AGGREGATE_KEYWORDS.some(kw => qLower.includes(kw));
+
   const dbMaxScores = {};
   for (const t of allL3Tables) {
     const dbPart = (t.table_id || '').split('.')[0].toLowerCase();
-    const score = t.relevance_score || 0;
+    let score = t.relevance_score || 0;
+    // When the question is aggregate-flavoured, boost analytics DB tables
+    // so a marginally-higher transactional anchor doesn't steal the vote.
+    if (hasAggregateSignal && autoDialect && ANALYTICS_DBS.includes(dbPart)) {
+      score *= 2.5;
+    }
     if (score > (dbMaxScores[dbPart] || 0)) dbMaxScores[dbPart] = score;
   }
+  console.log('[Pipeline] AggregateSignal:', hasAggregateSignal, 'RawMaxScores (pre-boost):', (() => {
+    const raw = {};
+    for (const t of allL3Tables) {
+      const d = (t.table_id||'').split('.')[0].toLowerCase();
+      const s = t.relevance_score || 0;
+      if (s > (raw[d]||0)) raw[d] = s;
+    }
+    return raw;
+  })());
   let detectedDb = '';
   let detectedDialect = dialect === 'auto' ? 'postgresql' : dialect;
   let maxScore = 0;
@@ -737,7 +765,7 @@ async function runPipeline() {
   if (!detectedDb && l3Tables.length) {
     detectedDb = (l3Tables[0].table_id || '').split('.')[0] || 'mock';
   }
-  console.log('[Pipeline] Detected DB:', detectedDb, 'Dialect:', detectedDialect, 'MaxScores:', dbMaxScores);
+  console.log('[Pipeline] Detected DB:', detectedDb, 'Dialect:', detectedDialect, 'BoostedMaxScores:', dbMaxScores);
 
   const permissionEnvelope = l3Result.permission_envelope || l3Res.data?.permission_envelope;
 
