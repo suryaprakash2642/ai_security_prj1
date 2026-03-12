@@ -77,13 +77,19 @@ class RankingEngine:
                 QueryIntent.TREND,
                 QueryIntent.COMPARISON,
             )
-            if c.table_name.lower() in universal_anchors and intent.intent not in _aggregate_intents:
+            # Also suppress anchor boost if AGGREGATION was among the matched
+            # intents (even if another intent won the classification).
+            _has_aggregate_signal = (
+                intent.intent in _aggregate_intents
+                or QueryIntent.AGGREGATION.value in intent.secondary_intents
+            )
+            if c.table_name.lower() in universal_anchors and not _has_aggregate_signal:
                 c.domain_affinity_score = max(c.domain_affinity_score, 0.8)
                 c.domain_affinity_score += anchor_boost
 
             # For aggregate/trend queries, boost domain_affinity of fact/summary tables
             # so they rank above raw transactional tables.
-            if intent.intent in _aggregate_intents:
+            if _has_aggregate_signal:
                 name_lower = c.table_name.lower()
                 _fact_keywords = ("summary", "summaries", "stats", "statistics",
                                    "metric", "metrics", "analytics", "fact_", "_facts")

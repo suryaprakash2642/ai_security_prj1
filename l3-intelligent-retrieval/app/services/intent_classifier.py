@@ -39,7 +39,7 @@ INTENT_RULES: list[IntentRule] = [
         intent=QueryIntent.JOIN_QUERY,
         keywords=[
             "join", "combine", "merge", "relate", "relationship",
-            "between", "across", "linked", "connected", "associated",
+            "between", "linked", "connected", "associated",
             "with their", "along with", "together with", "and their",
             "cross-reference", "match.*with", "correlate",
         ],
@@ -79,8 +79,10 @@ INTENT_RULES: list[IntentRule] = [
             "ratio", "rate", "distribution", "breakdown",
             "grouped by", "group by", "per", "each",
             "aggregate", "statistics", "summary",
+            "across all", "across.*facilit", "length of stay",
+            "readmission", "occupancy", "utilization", "throughput",
         ],
-        weight=1.0,
+        weight=1.15,
     ),
     # EXISTENCE_CHECK — yes/no existence language
     IntentRule(
@@ -198,6 +200,11 @@ class IntentClassifier:
             best_keywords = []
             confidence = 0.3
 
+        # Collect all intents that scored (used by ranking for multi-signal boosts)
+        secondary = [
+            i.value for i, (s, _) in scores.items() if i != best_intent and s > 0
+        ]
+
         # Extract domain hints
         domains = self._extract_domain_hints(lower)
 
@@ -207,6 +214,7 @@ class IntentClassifier:
             matched_keywords=best_keywords[:10],  # Cap keyword list
             domain_hints=domains,
             used_fallback=False,
+            secondary_intents=secondary,
         )
 
     def _extract_domain_hints(self, text: str) -> list[DomainHint]:

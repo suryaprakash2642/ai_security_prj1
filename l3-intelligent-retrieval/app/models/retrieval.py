@@ -18,6 +18,7 @@ from app.models.enums import (
     RetrievalStrategy,
     TableDecision,
 )
+from app.models.l4_models import PermissionEnvelope
 
 
 # ── Intent classification output ────────────────────────────
@@ -33,6 +34,8 @@ class IntentResult(BaseModel):
     matched_keywords: list[str] = Field(default_factory=list)
     domain_hints: list[DomainHint] = Field(default_factory=list)
     used_fallback: bool = False
+    # All intents that scored > 0, used by ranking for multi-signal boosts
+    secondary_intents: list[str] = Field(default_factory=list)
 
 
 # ── Candidate table (pre-policy) ────────────────────────────
@@ -184,6 +187,9 @@ class RetrievalResult(BaseModel):
 
     # Policy rules in natural language for LLM instruction
     nl_policy_rules: list[str] = Field(default_factory=list)
+
+    # Signed permission envelope from L4, forwarded for L5/L6/L7 verification.
+    permission_envelope: PermissionEnvelope | None = None
 
     # Security summary (no details about denied tables)
     denied_tables_count: int = 0
