@@ -109,6 +109,7 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
         max_prompt_tokens=settings.max_prompt_tokens,
         response_reserve_tokens=settings.response_reserve_tokens,
         default_max_rows=settings.default_max_rows,
+        database_metadata=request.database_metadata or None,
     )
 
     # ── Step 5: LLM call ──────────────────────────────────────────────────
@@ -193,8 +194,33 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
             permission_envelope=request.permission_envelope,
         )
 
+    # Infer target_database and actual dialect from the tables the LLM used.
+    # This is more reliable than the pre-selected dialect because the LLM
+    # chose which tables to reference based on the question context.
+    inferred_db = ""
+    inferred_dialect = request.dialect.value
+    if request.database_metadata and sql_tables:
+        # Build table_name → db_name map from schema
+        tname_to_db: dict[str, str] = {}
+        for t in request.filtered_schema.tables:
+            parts = (t.table_id or "").split(".")
+            short = (t.table_name or parts[-1] if parts else "").lower()
+            db = parts[0].lower() if parts else ""
+            if short and db:
+                tname_to_db[short] = db
+        # Find the most-referenced database in the generated SQL
+        db_counts: dict[str, int] = {}
+        for st in sql_tables:
+            db = tname_to_db.get(st, "")
+            if db:
+                db_counts[db] = db_counts.get(db, 0) + 1
+        if db_counts:
+            inferred_db = max(db_counts, key=db_counts.get)  # type: ignore[arg-type]
+            inferred_dialect = request.database_metadata.get(inferred_db, inferred_dialect)
+
     log.info("SQL generated successfully",
-             dialect=request.dialect.value,
+             dialect=inferred_dialect,
+             target_database=inferred_db,
              latency_ms=f"{total_latency_ms:.1f}",
              model=llm_resp.model,
              tables_included=assembled.tables_included,
@@ -204,7 +230,8 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
         request_id=request.request_id,
         status=GenerationStatus.GENERATED,
         sql=parse_result.sql,
-        dialect=request.dialect.value,
+        dialect=inferred_dialect,
+        target_database=inferred_db,
         generation_metadata=metadata,
         permission_envelope=request.permission_envelope,
     )

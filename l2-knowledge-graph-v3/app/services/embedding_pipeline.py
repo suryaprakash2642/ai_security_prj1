@@ -48,15 +48,51 @@ class EmbeddingPipeline:
 
         self._engine = create_async_engine(
             clean_dsn,
-            pool_size=5,
-            max_overflow=5,
+            pool_size=2,
+            max_overflow=2,
             connect_args=connect_args,
         )
         self._session_factory = sessionmaker(
             self._engine, class_=AsyncSession, expire_on_commit=False
         )
         self._http_client = httpx.AsyncClient(timeout=30.0)
+        await self._ensure_schema()
         logger.info("embedding_pipeline_connected")
+
+    async def _ensure_schema(self) -> None:
+        """Ensure schema_embeddings table exists and has required columns.
+
+        The table was originally created by setup_retrieval.py — we just need
+        to add the source_hash column if it is absent.  We intentionally skip
+        CREATE EXTENSION because pgvector is already installed on Aiven and that
+        statement requires superuser, which rolls back the whole transaction.
+        """
+        async with self._get_session() as session:
+            try:
+                # Create table if it was somehow dropped (matches setup_retrieval.py DDL).
+                await session.execute(text("""
+                    CREATE TABLE IF NOT EXISTS schema_embeddings (
+                        id              BIGSERIAL PRIMARY KEY,
+                        entity_type     VARCHAR(20)  NOT NULL DEFAULT 'table',
+                        entity_fqn      VARCHAR(500) NOT NULL,
+                        source_text     TEXT         NOT NULL DEFAULT '',
+                        is_active       BOOLEAN      NOT NULL DEFAULT true,
+                        embedding       vector(1536),
+                        created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                        UNIQUE (entity_fqn, entity_type)
+                    )
+                """))
+                # Add source_hash for idempotent refresh (safe on existing table).
+                await session.execute(text(
+                    "ALTER TABLE schema_embeddings "
+                    "ADD COLUMN IF NOT EXISTS source_hash TEXT NOT NULL DEFAULT ''"
+                ))
+                await session.commit()
+                logger.info("embedding_schema_ready")
+            except Exception as exc:
+                logger.error("embedding_schema_failed", error=str(exc))
+                await session.rollback()
+                raise
 
     async def close(self) -> None:
         if self._engine:
@@ -81,9 +117,15 @@ class EmbeddingPipeline:
 
             # Build composite source text
             columns = await self._reader.get_table_columns(table.fqn)
-            col_descriptions = ", ".join(
-                f"{c.name} ({c.data_type}): {c.description}" for c in columns if c.description
-            )
+            # Always include column names so semantic similarity reflects the
+            # actual schema — descriptions are appended only when present.
+            col_parts = []
+            for c in columns:
+                entry = f"{c.name} ({c.data_type})"
+                if c.description:
+                    entry += f": {c.description}"
+                col_parts.append(entry)
+            col_descriptions = ", ".join(col_parts)
             source_text = (
                 f"Table: {table.name}\n"
                 f"Description: {table.description}\n"
@@ -102,9 +144,9 @@ class EmbeddingPipeline:
             if embedding is None:
                 continue
 
-            # Store
+            # Store — use entity_type='table' so L3 vector search finds it.
             await self._store_embedding(
-                entity_type="composite",
+                entity_type="table",
                 entity_fqn=table.fqn,
                 source_text=source_text,
                 source_hash=source_hash,
@@ -112,36 +154,24 @@ class EmbeddingPipeline:
             )
             stats["embedded"] += 1
 
-            # Also embed individual table description
-            if table.description:
-                desc_hash = hashlib.sha256(table.description.encode()).hexdigest()
-                if not await self._has_current_embedding(f"{table.fqn}:desc", desc_hash):
-                    desc_embedding = await self._generate_embedding(table.description)
-                    if desc_embedding:
-                        await self._store_embedding(
-                            entity_type="table",
-                            entity_fqn=f"{table.fqn}:desc",
-                            source_text=table.description,
-                            source_hash=desc_hash,
-                            embedding=desc_embedding,
-                        )
-
-            # Embed individual column descriptions for column-level retrieval
+            # Embed every column by name (+ description when available) so that
+            # column-name semantic search can boost the correct parent table.
             for col in columns:
+                col_text = f"Column {col.name} ({col.data_type}) in {table.name}"
                 if col.description:
-                    col_text = f"Column {col.name} ({col.data_type}) in {table.name}: {col.description}"
-                    col_hash = hashlib.sha256(col_text.encode()).hexdigest()
-                    col_key = f"{col.fqn}:col_desc" if hasattr(col, "fqn") else f"{table.fqn}.{col.name}:col_desc"
-                    if not await self._has_current_embedding(col_key, col_hash):
-                        col_embedding = await self._generate_embedding(col_text)
-                        if col_embedding:
-                            await self._store_embedding(
-                                entity_type="column",
-                                entity_fqn=col_key,
-                                source_text=col_text,
-                                source_hash=col_hash,
-                                embedding=col_embedding,
-                            )
+                    col_text += f": {col.description}"
+                col_hash = hashlib.sha256(col_text.encode()).hexdigest()
+                col_key = col.fqn if hasattr(col, "fqn") and col.fqn else f"{table.fqn}.{col.name}"
+                if not await self._has_current_embedding(col_key, col_hash):
+                    col_embedding = await self._generate_embedding(col_text)
+                    if col_embedding:
+                        await self._store_embedding(
+                            entity_type="column",
+                            entity_fqn=col_key,
+                            source_text=col_text,
+                            source_hash=col_hash,
+                            embedding=col_embedding,
+                        )
 
         logger.info("embedding_refresh_complete", **stats)
         return stats
@@ -160,10 +190,11 @@ class EmbeddingPipeline:
             result = await session.execute(
                 text("""
                     SELECT entity_fqn, source_text,
-                           1 - (embedding <=> :query_vec::vector) AS similarity
-                    FROM embedding_metadata
+                           1 - (embedding <=> CAST(:query_vec AS vector)) AS similarity
+                    FROM schema_embeddings
                     WHERE entity_type = :etype
-                    ORDER BY embedding <=> :query_vec::vector
+                      AND is_active = true
+                    ORDER BY embedding <=> CAST(:query_vec AS vector)
                     LIMIT :limit
                 """),
                 {"query_vec": embedding_str, "etype": entity_type, "limit": limit},
@@ -176,20 +207,43 @@ class EmbeddingPipeline:
     # ── Private helpers ──────────────────────────────────────
 
     async def _generate_embedding(self, text: str) -> list[float] | None:
-        """Call the embedding API. Returns None on failure."""
-        if not self._http_client or not self._settings.embedding_api_key:
+        """Call the embedding API. Returns None on failure.
+
+        Supports two modes:
+        1. Standard OpenAI — when ``embedding_api_key`` is configured.
+        2. Azure OpenAI   — when ``AZURE_AI_ENDPOINT`` + ``AZURE_AI_API_KEY``
+           environment variables are present and no OpenAI key is configured.
+           Uses the ``text-embedding-ada-002`` deployment (1536-dim, matching
+           the ``schema_embeddings`` vector column).
+        """
+        import os
+
+        if not self._http_client:
+            return None
+
+        api_key = self._settings.embedding_api_key
+        azure_endpoint = os.getenv("AZURE_AI_ENDPOINT", "").rstrip("/")
+        azure_api_key = os.getenv("AZURE_AI_API_KEY", "")
+
+        if api_key:
+            # Standard OpenAI
+            url = f"{self._settings.embedding_api_base}/embeddings"
+            headers = {"Authorization": f"Bearer {api_key}"}
+            body: dict = {"model": self._settings.embedding_model, "input": text[:8000]}
+        elif azure_api_key and azure_endpoint:
+            # Azure OpenAI — text-embedding-ada-002 has 1536 dims, matches DB
+            url = (
+                f"{azure_endpoint}/openai/deployments/"
+                "text-embedding-ada-002/embeddings?api-version=2024-02-01"
+            )
+            headers = {"api-key": azure_api_key}
+            body = {"input": text[:8000]}
+        else:
             logger.debug("embedding_api_not_configured")
             return None
 
         try:
-            response = await self._http_client.post(
-                f"{self._settings.embedding_api_base}/embeddings",
-                headers={"Authorization": f"Bearer {self._settings.embedding_api_key}"},
-                json={
-                    "model": self._settings.embedding_model,
-                    "input": text[:8000],  # Truncate to avoid token limits
-                },
-            )
+            response = await self._http_client.post(url, headers=headers, json=body)
             response.raise_for_status()
             data = response.json()
             return data["data"][0]["embedding"]
@@ -202,17 +256,12 @@ class EmbeddingPipeline:
         async with self._get_session() as session:
             result = await session.execute(
                 text("""
-                    SELECT 1 FROM embedding_metadata
+                    SELECT 1 FROM schema_embeddings
                     WHERE entity_fqn = :fqn
                       AND source_hash = :hash
-                      AND model_version = :model
                     LIMIT 1
                 """),
-                {
-                    "fqn": entity_fqn,
-                    "hash": source_hash,
-                    "model": self._settings.embedding_model,
-                },
+                {"fqn": entity_fqn, "hash": source_hash},
             )
             return result.fetchone() is not None
 
@@ -230,24 +279,23 @@ class EmbeddingPipeline:
         async with self._get_session() as session:
             await session.execute(
                 text("""
-                    INSERT INTO embedding_metadata
-                        (entity_type, entity_fqn, model_name, model_version,
-                         source_text, source_hash, embedding)
+                    INSERT INTO schema_embeddings
+                        (entity_type, entity_fqn, source_text, source_hash,
+                         is_active, embedding)
                     VALUES
-                        (:etype, :fqn, :model_name, :model_version,
-                         :source, :hash, :embedding::vector)
-                    ON CONFLICT (entity_fqn, model_version)
+                        (:etype, :fqn, :source, :hash, true,
+                         CAST(:embedding AS vector))
+                    ON CONFLICT (entity_fqn, entity_type)
                     DO UPDATE SET
-                        source_text = :source,
-                        source_hash = :hash,
-                        embedding = :embedding::vector,
-                        created_at = NOW()
+                        source_text = EXCLUDED.source_text,
+                        source_hash = EXCLUDED.source_hash,
+                        embedding   = EXCLUDED.embedding,
+                        is_active   = true,
+                        created_at  = NOW()
                 """),
                 {
                     "etype": entity_type,
                     "fqn": entity_fqn,
-                    "model_name": self._settings.embedding_model,
-                    "model_version": self._settings.embedding_model,
                     "source": source_text[:10000],
                     "hash": source_hash,
                     "embedding": embedding_str,
@@ -258,7 +306,9 @@ class EmbeddingPipeline:
     async def rebuild_all(self) -> dict[str, int]:
         """Full rebuild: clear all embeddings and re-embed everything from graph."""
         async with self._get_session() as session:
-            await session.execute(text("DELETE FROM embedding_metadata"))
+            await session.execute(
+                text("DELETE FROM schema_embeddings WHERE entity_type IN ('table', 'column')")
+            )
             await session.commit()
 
         logger.info("embeddings_cleared_for_rebuild")

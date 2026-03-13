@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     circuit_breaker_cooldown_seconds: int = 30
 
     # Mock execution (dev — no real DB)
-    mock_execution: bool = True
+    mock_execution: bool = False
     mock_execution_latency_ms: int = 50
 
     # Aiven PostgreSQL

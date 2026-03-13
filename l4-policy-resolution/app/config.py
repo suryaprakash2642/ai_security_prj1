@@ -1,5 +1,6 @@
 """Configuration for L4 Policy Resolution Layer."""
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,7 +20,10 @@ class Settings(BaseSettings):
 
     # Security & Signatures
     envelope_ttl_seconds: int = 60
-    context_signing_key: str = "dev-context-signing-key-minimum-32-chars!"
+    context_signing_key: str = Field(
+        default="dev-context-signing-key-minimum-32-chars!",
+        validation_alias=AliasChoices("CONTEXT_SIGNING_KEY", "ENVELOPE_SIGNING_KEY"),
+    )
 
 
 def get_settings() -> Settings:

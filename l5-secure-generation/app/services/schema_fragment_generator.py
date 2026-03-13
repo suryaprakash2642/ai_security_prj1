@@ -30,7 +30,8 @@ def _format_fk_comment(table: FilteredTable) -> str:
 
 
 def generate_fragment(table: FilteredTable, envelope: PermissionEnvelope,
-                      dialect: SQLDialect = DialectEnum.POSTGRESQL) -> str:
+                      dialect: SQLDialect = DialectEnum.POSTGRESQL,
+                      database_metadata: dict[str, str] | None = None) -> str:
     """Generate a DDL fragment for one table as it should appear in the LLM prompt.
 
     Only permitted columns appear. Masked columns include rewrite expressions.
@@ -50,10 +51,20 @@ def generate_fragment(table: FilteredTable, envelope: PermissionEnvelope,
         # If no envelope decision (envelope-less call), include all columns
         allowed_col_names = {c.name for c in table.columns}
 
-    # Header
-    lines = [
-        f"-- Table: {table.name} | Domain: {table.domain}",
-    ]
+    # Extract database name from table_id FQN (e.g. "apollo_analytics.public.table")
+    db_name = (table.table_id or "").split(".")[0] if table.table_id else ""
+
+    # Header — include database name so LLM knows which DB this table is in
+    header = f"-- Table: {table.name} | Domain: {table.domain}"
+    if db_name and database_metadata:
+        db_dialect = database_metadata.get(db_name.lower(), "")
+        if db_dialect:
+            header += f" | Database: {db_name} ({db_dialect})"
+        else:
+            header += f" | Database: {db_name}"
+    elif db_name:
+        header += f" | Database: {db_name}"
+    lines = [header]
     if table.nl_description:
         lines.append(f"-- Description: {table.nl_description}")
 
@@ -94,7 +105,8 @@ def generate_fragment(table: FilteredTable, envelope: PermissionEnvelope,
 
 
 def generate_all_fragments(tables: list[FilteredTable], envelope: PermissionEnvelope,
-                           dialect: SQLDialect = DialectEnum.POSTGRESQL) -> list[tuple[FilteredTable, str]]:
+                           dialect: SQLDialect = DialectEnum.POSTGRESQL,
+                           database_metadata: dict[str, str] | None = None) -> list[tuple[FilteredTable, str]]:
     """Return (table, ddl_string) pairs for all allowed tables, sorted by relevance desc."""
     allowed_ids = envelope.allowed_table_ids
     sorted_tables = sorted(
@@ -102,4 +114,5 @@ def generate_all_fragments(tables: list[FilteredTable], envelope: PermissionEnve
         key=lambda t: t.relevance_score,
         reverse=True,
     )
-    return [(t, generate_fragment(t, envelope, dialect)) for t in sorted_tables]
+    return [(t, generate_fragment(t, envelope, dialect, database_metadata=database_metadata))
+            for t in sorted_tables]

@@ -52,6 +52,42 @@ class GraphReadRepository:
     def __init__(self, neo4j: Neo4jManager) -> None:
         self._neo4j = neo4j
 
+    # ── Database discovery ─────────────────────────────────────
+
+    async def get_all_databases(self) -> list[dict[str, Any]]:
+        """Return all active databases with engine type and metadata."""
+        query = """
+        MATCH (db:Database)
+        WHERE db.is_active = true
+        OPTIONAL MATCH (db)-[:HAS_SCHEMA]->(s:Schema)-[:HAS_TABLE]->(t:Table)
+        WHERE t.is_active = true
+        OPTIONAL MATCH (t)-[:BELONGS_TO_DOMAIN]->(d:Domain)
+        WITH db,
+             count(DISTINCT t) AS table_count,
+             collect(DISTINCT d.name) AS domains
+        RETURN db.name AS name,
+               db.engine AS engine,
+               db.description AS description,
+               db.host AS host,
+               db.port AS port,
+               table_count,
+               domains
+        ORDER BY db.name
+        """
+        records = await self._neo4j.execute_read(query, {})
+        return [
+            {
+                "name": r["name"],
+                "engine": r["engine"] or "postgresql",
+                "description": r.get("description", ""),
+                "host": r.get("host", ""),
+                "port": r.get("port", 0),
+                "table_count": r.get("table_count", 0),
+                "domains": r.get("domains", []),
+            }
+            for r in records
+        ]
+
     # ── Schema queries ───────────────────────────────────────
 
     async def get_tables_by_domain(

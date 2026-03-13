@@ -34,9 +34,11 @@ from app.services.audit_logger import (
 )
 from app.services.column_scoper import ColumnScoper
 from app.services.context_assembler import ContextAssembler
+from app.services.dialect_detector import DialectDetector
 from app.services.embedding_engine import EmbeddingEngine
 from app.services.intent_classifier import IntentClassifier
 from app.services.join_graph import JoinGraphBuilder
+from app.services.query_enrichment import QueryEnrichmentService
 from app.services.ranking_engine import RankingEngine
 from app.services.rbac_filter import RBACFilter
 from app.services.retrieval_pipeline import RetrievalPipeline
@@ -68,6 +70,8 @@ class RetrievalOrchestrator:
         column_scoper: ColumnScoper,
         join_graph_builder: JoinGraphBuilder,
         context_assembler: ContextAssembler,
+        enrichment_service: QueryEnrichmentService | None = None,
+        dialect_detector: DialectDetector | None = None,
     ) -> None:
         self._settings = settings
         self._embedding = embedding_engine
@@ -78,6 +82,8 @@ class RetrievalOrchestrator:
         self._scoper = column_scoper
         self._join = join_graph_builder
         self._assembler = context_assembler
+        self._enrichment = enrichment_service
+        self._dialect = dialect_detector or DialectDetector()
 
     async def resolve(self, request: RetrievalRequest) -> RetrievalResult:
         """Execute the full retrieval pipeline.
@@ -154,11 +160,27 @@ class RetrievalOrchestrator:
             domains=[d.value for d in intent.domain_hints],
         )
 
+        # ── Stage 3.5: Query enrichment ────────────────────
+        enriched = None
+        if self._enrichment:
+            try:
+                enriched = await self._enrichment.enrich(preprocessed, intent.intent.value)
+                logger.info(
+                    "query_enriched",
+                    request_id=request_id,
+                    database_hints=enriched.database_hints,
+                    table_hints=enriched.table_hints,
+                    suggested_dialect=enriched.suggested_dialect,
+                )
+            except Exception as exc:
+                logger.warning("enrichment_failed", error=str(exc))
+
         # ── Stage 4: Multi-strategy retrieval ───────────────
         try:
             candidates, retrieval_timing = await self._retrieval.retrieve_candidates(
                 preprocessed, embedding, intent, request.max_tables,
                 clearance_level=ctx.clearance_level,  # Fix 1: scope cache by clearance
+                enriched=enriched,
             )
             metadata.semantic_search_ms = retrieval_timing.get("semantic_ms", 0)
             metadata.keyword_search_ms = retrieval_timing.get("keyword_ms", 0)
@@ -189,7 +211,7 @@ class RetrievalOrchestrator:
         except Exception:
             pass
 
-        ranked = self._ranking.rank(candidates, intent, accessible_domains)
+        ranked = self._ranking.rank(candidates, intent, accessible_domains, enriched=enriched)
 
         # ── Stage 6: RBAC filtering + L4 resolution ─────────
         try:
@@ -258,6 +280,28 @@ class RetrievalOrchestrator:
             denied_count=denied_count,
             metadata=metadata,
             max_tables=request.max_tables,
+        )
+
+        # ── Stage 9.5: Dialect detection ─────────────────────
+        # Stamp each table with its dialect from its FQN, then pick the
+        # global dialect from the top table for backward compatibility.
+        detected_dialect, target_database = self._dialect.detect(
+            filtered_tables, enriched,
+        )
+        # Also stamp the final assembled tables (may differ after budget trim)
+        self._dialect.stamp_tables(result.filtered_schema)
+        result.detected_dialect = detected_dialect
+        result.target_database = target_database
+        result.database_metadata = self._dialect.get_database_metadata(
+            result.filtered_schema,
+        )
+        logger.info(
+            "dialect_detected",
+            request_id=request_id,
+            detected_dialect=detected_dialect,
+            target_database=target_database,
+            database_metadata=result.database_metadata,
+            per_table={t.table_id: t.dialect for t in result.filtered_schema},
         )
 
         metadata.total_latency_ms = (time.monotonic() - start) * 1000

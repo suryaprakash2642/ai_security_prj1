@@ -15,6 +15,21 @@ from app.models.api import APIResponse, ColumnResponse, ForeignKeyResponse, Tabl
 router = APIRouter(prefix="/api/v1/graph", tags=["schema"])
 
 
+@router.get("/databases", response_model=APIResponse)
+async def get_all_databases(
+    _identity: ServiceIdentity = Depends(require_permission("read_schema")),
+):
+    """Return all active databases with engine type, domains, and table counts."""
+    container = get_container()
+    cached = await container.cache.get("databases:all")
+    if cached:
+        return APIResponse(data=cached)
+
+    databases = await container.graph_reader.get_all_databases()
+    await container.cache.set("databases:all", databases, ttl=300)
+    return APIResponse(data=databases, meta={"count": len(databases)})
+
+
 @router.get("/tables/by-domain", response_model=APIResponse)
 async def get_tables_by_domain(
     domain: str = Query(..., min_length=1, description="Domain name to filter tables"),

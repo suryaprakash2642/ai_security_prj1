@@ -17,6 +17,7 @@ from app.config import Settings
 from app.models.l2_models import (
     L2APIResponse,
     L2ColumnInfo,
+    L2DatabaseInfo,
     L2ForeignKey,
     L2RoleDomainAccess,
     L2TableInfo,
@@ -131,6 +132,13 @@ class L2Client:
         The RBAC filter handles empty domain map by passing all candidates to L4.
         """
         return {}
+
+    # ── Database discovery ────────────────────────────────────
+
+    async def get_all_databases(self) -> list[L2DatabaseInfo]:
+        """Fetch all active databases with engine type and metadata."""
+        resp = await self._get("/api/v1/graph/databases")
+        return [L2DatabaseInfo(**d) for d in (resp.data or [])]
 
     # ── Health ──────────────────────────────────────────────
 

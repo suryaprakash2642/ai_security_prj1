@@ -6,17 +6,21 @@
 // ============================================================
 
 // ─── STEP 1: Role nodes (needed for APPLIES_TO_ROLE) ─────────────────────────
+// Role names MUST match L1 AD_TO_PIPELINE_ROLE mapping output (lowercase).
 
-MERGE (:Role {name: "doctor"})         SET (MATCH (r:Role {name:"doctor"})         RETURN r LIMIT 1) SKIP 0;
-MERGE (:Role {name: "nurse"})          ON CREATE SET (MATCH (r:Role {name:"nurse"})          RETURN r LIMIT 1) SKIP 0;
+MERGE (:Role {name: "doctor"});
+MERGE (:Role {name: "nurse"});
 MERGE (:Role {name: "clinical_staff"});
 MERGE (:Role {name: "billing_staff"});
 MERGE (:Role {name: "pharmacy_staff"});
+MERGE (:Role {name: "pharmacist"});
 MERGE (:Role {name: "analyst"});
-MERGE (:Role {name: "admin"});
+MERGE (:Role {name: "hospital_admin"});
 MERGE (:Role {name: "auditor"});
 MERGE (:Role {name: "researcher"});
 MERGE (:Role {name: "hr_staff"});
+MERGE (:Role {name: "hr_manager"});
+MERGE (:Role {name: "revenue_manager"});
 MERGE (:Role {name: "security_officer"});
 MERGE (:Role {name: "base_user"});
 
@@ -26,6 +30,8 @@ MERGE (:Role {name: "base_user"});
 MATCH (p:Policy {policy_id: "POL-001"}), (r:Role {name: "clinical_staff"}) MERGE (p)-[:APPLIES_TO_ROLE]->(r);
 MATCH (p:Policy {policy_id: "POL-001"}), (r:Role {name: "doctor"})         MERGE (p)-[:APPLIES_TO_ROLE]->(r);
 MATCH (p:Policy {policy_id: "POL-001"}), (r:Role {name: "nurse"})          MERGE (p)-[:APPLIES_TO_ROLE]->(r);
+// hospital_admin inherits clinical access
+MATCH (p:Policy {policy_id: "POL-001"}), (r:Role {name: "hospital_admin"}) MERGE (p)-[:APPLIES_TO_ROLE]->(r);
 
 // POL-002: MASK on PII columns (HIPAA) — any authenticated user
 MATCH (p:Policy {policy_id: "POL-002"}), (r:Role {name: "base_user"})     MERGE (p)-[:APPLIES_TO_ROLE]->(r);
@@ -36,8 +42,9 @@ MATCH (p:Policy {policy_id: "POL-003"}), (r:Role {name: "doctor"})        MERGE 
 // POL-004: 42 CFR Part 2 DENY — substance abuse for all
 MATCH (p:Policy {policy_id: "POL-004"}), (r:Role {name: "base_user"})     MERGE (p)-[:APPLIES_TO_ROLE]->(r);
 
-// POL-005: Billing ALLOW for billing staff
-MATCH (p:Policy {policy_id: "POL-005"}), (r:Role {name: "billing_staff"}) MERGE (p)-[:APPLIES_TO_ROLE]->(r);
+// POL-005: Billing ALLOW for billing staff + revenue managers
+MATCH (p:Policy {policy_id: "POL-005"}), (r:Role {name: "billing_staff"})    MERGE (p)-[:APPLIES_TO_ROLE]->(r);
+MATCH (p:Policy {policy_id: "POL-005"}), (r:Role {name: "revenue_manager"})  MERGE (p)-[:APPLIES_TO_ROLE]->(r);
 
 // POL-006: DENY psychotherapy notes except treating doctor
 MATCH (p:Policy {policy_id: "POL-006"}), (r:Role {name: "base_user"})     MERGE (p)-[:APPLIES_TO_ROLE]->(r);
@@ -244,3 +251,101 @@ MATCH (p:Policy {policy_id: "POL-004"}), (s:Schema)
 MATCH (p:Policy {policy_id: "POL-012"}), (s:Schema)
   WHERE s.name = "pharmacy" OR s.fqn CONTAINS ".pharmacy"
   MERGE (p)-[:GOVERNS_SCHEMA]->(s);
+
+// ─── STEP 9: Additional policies from previous implementation ─────────────────
+
+// ── HR Admin Full Access (hospital_admin + hr_manager) ──
+MATCH (r:Role {name: "hospital_admin"})
+MERGE (p_hr:Policy {policy_id: "POL-HR-001"})
+SET p_hr.name = "HR Admin Full Access",
+    p_hr.nl_description = "Hospital administrators can access all HR records including payroll and credentials",
+    p_hr.structured_rule = '{"effect":"ALLOW","target":{"domain":"hr"},"subject":{"role":"hospital_admin"}}',
+    p_hr.policy_type = "ALLOW",
+    p_hr.priority = 100,
+    p_hr.is_active = true,
+    p_hr.created_by = "compliance-admin",
+    p_hr.created_at = datetime(),
+    p_hr.version = 1
+MERGE (p_hr)-[:APPLIES_TO_ROLE]->(r);
+
+MATCH (p:Policy {policy_id: "POL-HR-001"}), (r:Role {name: "hr_manager"})
+MERGE (p)-[:APPLIES_TO_ROLE]->(r);
+
+MATCH (p:Policy {policy_id: "POL-HR-001"}), (r:Role {name: "hr_staff"})
+MERGE (p)-[:APPLIES_TO_ROLE]->(r);
+
+MATCH (p:Policy {policy_id: "POL-HR-001"}), (d:Domain {name: "hr"})
+MERGE (p)-[:GOVERNS_DOMAIN]->(d);
+
+MATCH (p:Policy {policy_id: "POL-HR-001"}), (t:Table)-[:BELONGS_TO_DOMAIN]->(d:Domain {name: "hr"})
+WHERE t.is_active = true
+MERGE (p)-[:GOVERNS_TABLE]->(t);
+
+// ── Clinical Analytics Access (doctors + hospital_admin) ──
+MATCH (r:Role {name: "doctor"})
+MERGE (p_an:Policy {policy_id: "POL-ANALYTICS-001"})
+SET p_an.name = "Clinical Analytics Access",
+    p_an.nl_description = "Doctors can access clinical analytics for quality metrics and encounter summaries",
+    p_an.structured_rule = '{"effect":"ALLOW","target":{"domain":"analytics"},"subject":{"role":"doctor"}}',
+    p_an.policy_type = "ALLOW",
+    p_an.priority = 100,
+    p_an.is_active = true,
+    p_an.created_by = "compliance-admin",
+    p_an.created_at = datetime(),
+    p_an.version = 1
+MERGE (p_an)-[:APPLIES_TO_ROLE]->(r);
+
+MATCH (p:Policy {policy_id: "POL-ANALYTICS-001"}), (r:Role {name: "hospital_admin"})
+MERGE (p)-[:APPLIES_TO_ROLE]->(r);
+
+MATCH (p:Policy {policy_id: "POL-ANALYTICS-001"}), (d:Domain {name: "analytics"})
+MERGE (p)-[:GOVERNS_DOMAIN]->(d);
+
+MATCH (p:Policy {policy_id: "POL-ANALYTICS-001"}), (t:Table)-[:BELONGS_TO_DOMAIN]->(d:Domain {name: "analytics"})
+WHERE t.is_active = true
+MERGE (p)-[:GOVERNS_TABLE]->(t);
+
+// ── General Reference Data Access (doctors, nurses, hospital_admin) ──
+MATCH (r:Role {name: "doctor"})
+MERGE (p_gen:Policy {policy_id: "POL-GENERAL-001"})
+SET p_gen.name = "General Reference Data Access",
+    p_gen.nl_description = "Clinical staff can access general reference data like departments, facilities, and appointments",
+    p_gen.structured_rule = '{"effect":"ALLOW","target":{"domain":"general"},"subject":{"role":"doctor"}}',
+    p_gen.policy_type = "ALLOW",
+    p_gen.priority = 100,
+    p_gen.is_active = true,
+    p_gen.created_by = "compliance-admin",
+    p_gen.created_at = datetime(),
+    p_gen.version = 1
+MERGE (p_gen)-[:APPLIES_TO_ROLE]->(r);
+
+MATCH (p:Policy {policy_id: "POL-GENERAL-001"}), (r:Role {name: "nurse"})
+MERGE (p)-[:APPLIES_TO_ROLE]->(r);
+
+MATCH (p:Policy {policy_id: "POL-GENERAL-001"}), (r:Role {name: "hospital_admin"})
+MERGE (p)-[:APPLIES_TO_ROLE]->(r);
+
+MATCH (p:Policy {policy_id: "POL-GENERAL-001"}), (d:Domain {name: "general"})
+MERGE (p)-[:GOVERNS_DOMAIN]->(d);
+
+MATCH (p:Policy {policy_id: "POL-GENERAL-001"}), (t:Table)-[:BELONGS_TO_DOMAIN]->(d:Domain {name: "general"})
+WHERE t.is_active = true
+MERGE (p)-[:GOVERNS_TABLE]->(t);
+
+// ── Pharmacist Prescription Access ──
+MATCH (r:Role {name: "pharmacist"})
+MERGE (p_rx:Policy {policy_id: "POL-PHARMACY-001"})
+SET p_rx.name = "Pharmacist Prescription Access",
+    p_rx.nl_description = "Pharmacists can access prescription, allergy, and medication-related clinical data",
+    p_rx.structured_rule = '{"effect":"ALLOW","target":{"tables":["prescriptions","allergies","patients"]},"subject":{"role":"pharmacist"}}',
+    p_rx.policy_type = "ALLOW",
+    p_rx.priority = 100,
+    p_rx.is_active = true,
+    p_rx.created_by = "compliance-admin",
+    p_rx.created_at = datetime(),
+    p_rx.version = 1
+MERGE (p_rx)-[:APPLIES_TO_ROLE]->(r);
+
+MATCH (p:Policy {policy_id: "POL-PHARMACY-001"}), (t:Table)
+WHERE t.name IN ["prescriptions", "allergies", "patients"] AND t.is_active = true
+MERGE (p)-[:GOVERNS_TABLE]->(t);

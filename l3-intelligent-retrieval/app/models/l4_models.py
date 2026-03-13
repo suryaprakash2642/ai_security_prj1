@@ -46,6 +46,7 @@ class TablePermission(BaseModel):
     columns: list[ColumnDecision] = Field(default_factory=list)
     row_filters: list[str] = Field(default_factory=list)
     aggregation_only: bool = False
+    denied_in_select: list[str] = Field(default_factory=list, description="Columns forbidden in SELECT under aggregation_only")
     max_rows: int | None = None
     nl_rules: list[str] = Field(default_factory=list)
     reason: str = ""
@@ -74,6 +75,7 @@ class PermissionEnvelope(BaseModel):
     table_permissions: list[TablePermission] = Field(default_factory=list)
     join_restrictions: list[JoinRestriction] = Field(default_factory=list)
     global_nl_rules: list[str] = Field(default_factory=list)
+    signature: str = ""
     resolved_at: str = ""
     policy_version: int = 0
 

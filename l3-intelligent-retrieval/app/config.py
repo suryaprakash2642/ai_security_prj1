@@ -90,7 +90,7 @@ class Settings(BaseModel):
     embedding_cache_max_entries: int = 10000
 
     # L2 Knowledge Graph
-    l2_base_url: str = "http://localhost:8200"
+    l2_base_url: str = "http://localhost:8002"
     l2_timeout: int = 5
     l2_service_id: str = "l3-retrieval"
     l2_service_role: str = "pipeline_reader"

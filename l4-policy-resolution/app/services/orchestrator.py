@@ -24,7 +24,7 @@ from app.models.api_models import (
     PolicyResolveRequest,
     TablePermission,
 )
-from app.models.enums import TableDecision
+from app.models.enums import ColumnVisibility, TableDecision
 from app.services.condition_aggregator import ConditionAggregator
 from app.services.conflict_resolver import ConflictResolver
 from app.services.graph_client import GraphClient
@@ -234,6 +234,17 @@ class PolicyOrchestrator:
                     else:
                         # Row-Level & Constraint Aggregation
                         aggregator.aggregate_table_conditions(active_policies, table_perm)
+
+                    # Enforce denied_in_select at the column level: mark those
+                    # columns HIDDEN so they never appear in the schema sent to
+                    # the LLM.  This is the primary enforcement — NL rules and
+                    # L6 gate checks are defence-in-depth only.
+                    if table_perm.denied_in_select:
+                        denied_set = set(table_perm.denied_in_select)
+                        for cd in table_perm.columns:
+                            if cd.column_name in denied_set:
+                                cd.visibility = ColumnVisibility.HIDDEN
+                                cd.reason = "HIDDEN by aggregation_only denied_in_select"
 
                     # Track policies for global constraints (like Joins)
                     all_active_policies.extend(active_policies)

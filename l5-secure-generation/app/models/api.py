@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.models.enums import GenerationStatus, SQLDialect
 
@@ -25,6 +25,7 @@ class TablePermission(BaseModel):
     columns: list[ColumnDecision] = Field(default_factory=list)
     row_filters: list[str] = Field(default_factory=list)
     aggregation_only: bool = False
+    denied_in_select: list[str] = Field(default_factory=list, description="Columns forbidden in SELECT under aggregation_only")
     max_rows: int | None = None
     nl_rules: list[str] = Field(default_factory=list)
     reason: str = ""
@@ -85,7 +86,10 @@ class SchemaColumn(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: str
     data_type: str = "VARCHAR"
-    nl_description: str = ""
+    nl_description: str = Field(
+        default="",
+        validation_alias=AliasChoices("nl_description", "description"),
+    )
     is_masked: bool = False
     sql_rewrite: str | None = None
     sensitivity_level: int = 1
@@ -126,7 +130,7 @@ class FilteredSchema(BaseModel):
 
 class GenerationRequest(BaseModel):
     """POST /api/v1/generate/sql"""
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     request_id: str = ""
     user_question: str = Field(..., min_length=3, max_length=2000)
@@ -134,6 +138,9 @@ class GenerationRequest(BaseModel):
     filtered_schema: FilteredSchema
     dialect: SQLDialect = SQLDialect.POSTGRESQL
     security_context: dict[str, Any] = Field(default_factory=dict)
+    # Per-database dialect map from L3 — lets the LLM decide which
+    # database to target rather than forcing a single dialect upfront.
+    database_metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class GenerationMetadata(BaseModel):
@@ -159,6 +166,7 @@ class GenerationResponse(BaseModel):
     status: GenerationStatus
     sql: str | None = None
     dialect: str = ""
+    target_database: str = ""
     cannot_answer_reason: str | None = None
     generation_metadata: GenerationMetadata = Field(default_factory=GenerationMetadata)
     permission_envelope: PermissionEnvelope | None = None

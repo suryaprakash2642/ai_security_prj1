@@ -52,6 +52,7 @@ class ExtractedColumn:
     is_pk: bool = False
     is_nullable: bool = True
     ordinal_position: int = 0
+    description: str = ""
 
 
 @dataclass
@@ -69,6 +70,7 @@ class ExtractedTable:
     columns: list[ExtractedColumn] = field(default_factory=list)
     foreign_keys: list[ExtractedForeignKey] = field(default_factory=list)
     row_count_approx: int = 0
+    description: str = ""
 
 
 @dataclass
@@ -174,6 +176,7 @@ class PostgreSQLCrawler(BaseCrawler):
                 tables_by_schema[s][tname] = ExtractedTable(
                     schema_name=s,
                     table_name=tname,
+                    description=row["description"] or "",
                 )
 
             # 2. Extract columns
@@ -200,6 +203,7 @@ class PostgreSQLCrawler(BaseCrawler):
                             data_type=row["data_type"],
                             is_nullable=row["is_nullable"] == "YES",
                             ordinal_position=row["ordinal_position"],
+                            description=row["description"] or "",
                         )
                     )
 
@@ -427,6 +431,7 @@ class SchemaDiscoveryService:
                     table_node = TableNode(
                         fqn=table_fqn,
                         name=ext_table.table_name,
+                        description=ext_table.description,
                         sensitivity_level=SensitivityLevel.INTERNAL,
                         domain=domain,
                         row_count_approx=ext_table.row_count_approx,
@@ -477,6 +482,7 @@ class SchemaDiscoveryService:
                             data_type=ext_col.data_type,
                             is_pk=ext_col.is_pk,
                             is_nullable=ext_col.is_nullable,
+                            description=ext_col.description,
                         )
                         await self._graph.upsert_column(col_node, table_fqn, ordinal_position=ext_col.ordinal_position)
 

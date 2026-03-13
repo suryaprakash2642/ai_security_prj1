@@ -36,6 +36,9 @@ class NLRuleGenerator:
             
         if table_perm.aggregation_only:
             rules.append(f"MANDATORY: Queries against '{table_name}' must be aggregations (e.g. COUNT, SUM). You cannot SELECT individual rows.")
+            if table_perm.denied_in_select:
+                cols = ", ".join(table_perm.denied_in_select)
+                rules.append(f"MANDATORY: You MUST NOT include these columns in SELECT for '{table_name}': {cols}. These are patient identifiers forbidden under aggregation-only policy.")
             
         if table_perm.max_rows:
             rules.append(f"MANDATORY: Queries against '{table_name}' must be limited to a maximum of {table_perm.max_rows} rows.")

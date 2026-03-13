@@ -73,6 +73,7 @@ class RegulationCode(str, Enum):
 
 class DatabaseEngine(str, Enum):
     SQLSERVER = "sqlserver"
+    MYSQL = "mysql"
     ORACLE = "oracle"
     POSTGRESQL = "postgresql"
     MONGODB = "mongodb"

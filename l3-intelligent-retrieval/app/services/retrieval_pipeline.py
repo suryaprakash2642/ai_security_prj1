@@ -23,7 +23,7 @@ from app.clients.vector_search import VectorSearchClient
 from app.config import Settings, load_ranking_weights
 from app.models.enums import DomainHint, QueryIntent, RetrievalStrategy
 from app.models.l2_models import L2ForeignKey, L2TableInfo, L2VectorSearchResult
-from app.models.retrieval import CandidateTable, IntentResult
+from app.models.retrieval import CandidateTable, EnrichedQuery, IntentResult
 
 logger = structlog.get_logger(__name__)
 
@@ -51,6 +51,7 @@ class RetrievalPipeline:
         intent: IntentResult,
         max_tables: int = 10,
         clearance_level: int = 1,
+        enriched: EnrichedQuery | None = None,
     ) -> tuple[list[CandidateTable], dict[str, float]]:
         """Run all three strategies concurrently and fuse results.
 
@@ -61,12 +62,16 @@ class RetrievalPipeline:
         top_k = retrieval_config.get("semantic_top_k", 15)
         min_sim = retrieval_config.get("semantic_min_threshold", 0.35)
 
+        # Extract database_names filter from enrichment
+        database_names = enriched.database_hints if enriched and enriched.database_hints else None
+
         timing: dict[str, float] = {}
 
         # Run all three strategies concurrently
         t0 = time.monotonic()
         semantic_task = asyncio.create_task(
-            self._semantic_search(embedding, top_k, min_sim, intent, clearance_level)
+            self._semantic_search(embedding, top_k, min_sim, intent, clearance_level,
+                                  database_names=database_names)
         )
         keyword_task = asyncio.create_task(
             self._keyword_search(question, intent)
@@ -104,6 +109,7 @@ class RetrievalPipeline:
         min_similarity: float,
         intent: IntentResult,
         clearance_level: int = 1,
+        database_names: list[str] | None = None,
     ) -> list[CandidateTable]:
         """Query pgvector for semantically similar tables.
 
@@ -140,13 +146,28 @@ class RetrievalPipeline:
         results = await self._vector.search_similar(
             embedding, top_k=top_k, min_similarity=min_similarity,
             entity_type="table",
+            database_names=database_names,
         )
 
-        # Optional: column-level search for DATA_LOOKUP and DEFINITION
-        if intent.intent in (QueryIntent.DATA_LOOKUP, QueryIntent.DEFINITION):
+        # If database filtering returned too few results, retry without filter
+        if database_names and len(results) < 2:
+            logger.debug("semantic_search_broadening", filtered_count=len(results))
+            results = await self._vector.search_similar(
+                embedding, top_k=top_k, min_similarity=min_similarity,
+                entity_type="table",
+            )
+
+        # Column-level semantic search for intent types where a column name
+        # in the question is a strong signal (DATA_LOOKUP, DEFINITION,
+        # AGGREGATION).  For aggregation, metric column names like
+        # `avg_length_of_stay` will outscore abbreviations like `avg_los`,
+        # pulling the correct parent table to the top.
+        if intent.intent in (QueryIntent.DATA_LOOKUP, QueryIntent.DEFINITION,
+                             QueryIntent.AGGREGATION):
             col_results = await self._vector.search_similar(
                 embedding, top_k=5, min_similarity=min_similarity + 0.05,
                 entity_type="column",
+                database_names=database_names,
             )
             results.extend(col_results)
 

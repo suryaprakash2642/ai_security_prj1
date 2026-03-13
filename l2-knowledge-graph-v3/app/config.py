@@ -35,15 +35,15 @@ class Settings(BaseSettings):
     neo4j_write_user: str = "neo4j"
     neo4j_write_password: str = "changeme"
     neo4j_database: str = "neo4j"
-    neo4j_max_pool_size: int = 50
+    neo4j_max_pool_size: int = 10
     neo4j_encrypted: bool = False
     neo4j_ca_cert_path: str = ""  # Path to CA cert for TLS; empty = trust system CAs
 
     # PostgreSQL audit
     pg_audit_dsn: str = "postgresql+asyncpg://l2_admin:changeme123@localhost:5432/l2_audit"
     pg_audit_ca_cert_path: str = ""
-    pg_pool_min: int = 5
-    pg_pool_max: int = 20
+    pg_pool_min: int = 2
+    pg_pool_max: int = 4
 
     # pgvector embeddings
     pg_vector_dsn: str = "postgresql+asyncpg://l2_admin:changeme123@localhost:5432/l2_audit"

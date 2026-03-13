@@ -10,16 +10,16 @@ $ErrorActionPreference = "Stop"
 
 # Array of services in the format "directory:image_name"
 $Services = @(
-  "l1-identity-context:l1-identity",
-  "l2-knowledge-graph-v3:l2-knowledge",
-  "l3-intelligent-retrieval:l3-retrieval",
-  "l4-policy-resolution:l4-policy",
-  "l5-secure-generation:l5-generation",
-  "l6-multi-gate-validation:l6-validation",
-  "l7-secure-execution:l7-execution",
-  "l8-audit-anomaly:l8-audit",
-  "front-end:front-end",
-  "frontend:frontend"
+#   "l1-identity-context:l1-identity",
+#   "l2-knowledge-graph-v3:l2-knowledge",
+#   "l3-intelligent-retrieval:l3-retrieval",
+#   "l4-policy-resolution:l4-policy",
+#   "l5-secure-generation:l5-generation",
+#   "l6-multi-gate-validation:l6-validation",
+  "l7-secure-execution:l7-execution"
+#   "l8-audit-anomaly:l8-audit",
+#   "front-end:front-end",
+#   "frontend:frontend"
 )
 
 Write-Host "Starting build and push to $Repo..." -ForegroundColor Cyan

@@ -1,7 +1,7 @@
 """Secure Prompt Assembler.
 
 Assembles the four-section LLM prompt:
-  1. System instructions (fixed template per dialect)
+  1. System instructions (database-aware, not locked to a single dialect)
   2. Mandatory rules (nl_rules from Permission Envelope)
   3. Schema DDL fragments (allowed tables, ordered by relevance)
   4. User question (sanitized)
@@ -24,8 +24,10 @@ logger = structlog.get_logger(__name__)
 
 _SYSTEM_PROMPT_TEMPLATE = """\
 You are a secure SQL query generator for a healthcare database system.
-Your ONLY job is to generate a single, valid {dialect_hint} SQL SELECT query
+Your ONLY job is to generate a single, valid SQL SELECT query
 that answers the user's question using ONLY the provided schema.
+
+{database_context}
 
 ABSOLUTE RULES:
 1. Use ONLY tables and columns from the AVAILABLE SCHEMA section.
@@ -47,16 +49,18 @@ SCHEMA USAGE RULES:
     sides of comparisons: UPPER(e.encounter_type) = UPPER('inpatient').
 14. Columns named *_id (department_id, facility_id, unit_id) store codes, NOT human names.
     If the question asks to filter by a name (e.g. "Cardiology") but only an _id column exists,
-    either filter on a likely code pattern or add a comment — never assume the id equals the name.
+    either filter on a likely code pattern or add a comment -- never assume the id equals the name.
 15. Prefer SUM/COUNT aggregations over raw row scans for "how many" or "total" questions.
-16. When multiple tables contain similar metrics with different column names (e.g., `avg_length_of_stay`
-    vs `avg_los`), ALWAYS choose the table whose column name most closely or exactly matches the metric
-    term used in the question. `avg_length_of_stay` is the preferred column for any question about
-    'average length of stay' over a shorter alias like `avg_los`.
-17. When filtering a medical-specialty or disease column using LIKE, use a 5-character stem to match
-    all variants of the term. Examples: 'cardiac' or 'cardiology' → `LIKE '%CARDI%'` (matches
-    'Cardiology', 'Cardiac', 'Cardiovascular'); 'oncology'/'cancer' → `LIKE '%ONCO%'`;
-    'neurology' → `LIKE '%NEURO%'`. Never use the full word as the sole LIKE pattern.\
+
+GROUP BY RULES:
+16. When the question says "across all X", "per X", "by X", "for each X", or "at each X"
+    (e.g. "across all facilities", "per department"), SELECT those dimension columns and
+    GROUP BY them. "across all facilities" means GROUP BY facility columns, not a single scalar.
+17. When a table description says "Each row = ..." it is pre-aggregated summary data.
+    Always include the relevant dimension columns (facility, department, etc.) in GROUP BY
+    rather than collapsing all rows into one number. Add ORDER BY on the main metric DESC.
+18. Read column description comments carefully -- they contain guidance on when to filter,
+    which values exist, and which GROUP BY columns to use.\
 """
 
 # Short dialect names used in the system prompt role declaration.
@@ -67,13 +71,54 @@ _DIALECT_NAMES = {
     SQLDialect.ORACLE: "Oracle PL/SQL",
 }
 
-# Detailed syntax hints appended to the question footer in the user message.
-_DIALECT_HINTS = {
-    SQLDialect.POSTGRESQL: "Use LIMIT N, COALESCE(), standard SQL.",
-    SQLDialect.MYSQL: "Use LIMIT N, IFNULL(), CURDATE(), DATE_SUB(CURDATE(), INTERVAL N DAY). For INTERVAL always include the unit keyword: INTERVAL 30 DAY, INTERVAL 6 MONTH — never write INTERVAL '200' without a unit. Do NOT use date_trunc or PostgreSQL-style INTERVAL '30 days'. Only reference tables and columns provided in the schema — do NOT invent tables like 'units' or 'beds'.",
-    SQLDialect.TSQL: "Use TOP N, bracket-quoted names, ISNULL().",
-    SQLDialect.ORACLE: "Use FETCH FIRST N ROWS ONLY, NVL(), SYSDATE.",
+# String dialect names → enum
+_DIALECT_STR_TO_ENUM: dict[str, SQLDialect] = {
+    "postgresql": SQLDialect.POSTGRESQL,
+    "mysql": SQLDialect.MYSQL,
+    "tsql": SQLDialect.TSQL,
+    "oracle": SQLDialect.ORACLE,
 }
+
+# Detailed syntax hints per dialect, appended to the question footer.
+_DIALECT_HINTS: dict[str, str] = {
+    "postgresql": "Use LIMIT N, COALESCE(), standard SQL, DATE_TRUNC().",
+    "mysql": "Use LIMIT N, IFNULL(), CURDATE(), DATE_SUB(CURDATE(), INTERVAL N DAY). For INTERVAL always include the unit keyword: INTERVAL 30 DAY, INTERVAL 6 MONTH -- never write INTERVAL '200' without a unit. Do NOT use date_trunc or PostgreSQL-style INTERVAL '30 days'. Only reference tables and columns provided in the schema -- do NOT invent tables like 'units' or 'beds'.",
+    "tsql": "Use TOP N, bracket-quoted names, ISNULL().",
+    "oracle": "Use FETCH FIRST N ROWS ONLY, NVL(), SYSDATE.",
+}
+
+
+def _build_database_context(database_metadata: dict[str, str]) -> str:
+    """Build a short DATABASE CONTEXT section for the system prompt.
+
+    Tells the LLM which databases are available and which SQL dialect
+    each one uses, so it can generate syntactically correct SQL for the
+    target database without requiring the caller to pre-select a dialect.
+    """
+    if not database_metadata:
+        return "DATABASE CONTEXT:\nGenerate standard PostgreSQL SQL."
+
+    lines = ["DATABASE CONTEXT:", "The schema below includes tables from these databases:"]
+    for db_name, dialect in sorted(database_metadata.items()):
+        dialect_label = _DIALECT_NAMES.get(
+            _DIALECT_STR_TO_ENUM.get(dialect, SQLDialect.POSTGRESQL),
+            dialect.upper(),
+        )
+        lines.append(f"  - {db_name} ({dialect_label})")
+
+    if len(database_metadata) == 1:
+        single_dialect = next(iter(database_metadata.values()))
+        dialect_label = _DIALECT_NAMES.get(
+            _DIALECT_STR_TO_ENUM.get(single_dialect, SQLDialect.POSTGRESQL),
+            single_dialect.upper(),
+        )
+        lines.append(f"Generate {dialect_label} SQL.")
+    else:
+        lines.append(
+            "Each table header shows which database it belongs to. "
+            "Use the correct SQL dialect for the database whose tables you reference."
+        )
+    return "\n".join(lines)
 
 
 # ── Token estimation (very rough: 1 token ≈ 4 chars) ─────────────────────
@@ -94,11 +139,12 @@ def _compress_ddl(ddl: str, level: int) -> str:
         lines = [l for l in lines if not (l.strip().startswith("--") and "MASKED" not in l
                                           and "REQUIRED" not in l and "AGGREGATION" not in l
                                           and "Join:" not in l and "Table:" not in l
-                                          and "Description:" not in l)]
+                                          and "Description:" not in l and "Database:" not in l)]
     elif level == 2:
         # Keep only table header + column names + masking
         lines = [l for l in lines if (l.strip().startswith("--") and (
             "Table:" in l or "MASKED:" in l or "REQUIRED:" in l or "AGGREGATION" in l
+            or "Database:" in l
         )) or l.strip().startswith("CREATE") or l.strip().startswith(")") or (
             l.strip() and not l.strip().startswith("--")
         )]
@@ -108,7 +154,8 @@ def _compress_ddl(ddl: str, level: int) -> str:
         for l in lines:
             stripped = l.strip()
             if stripped.startswith("CREATE") or stripped.startswith(")") or \
-               (stripped.startswith("--") and ("Table:" in stripped or "REQUIRED:" in stripped)):
+               (stripped.startswith("--") and ("Table:" in stripped or "REQUIRED:" in stripped
+                                               or "Database:" in stripped)):
                 result.append(l)
             elif stripped and not stripped.startswith("--"):
                 # Keep just the first "word word" (name type)
@@ -144,11 +191,17 @@ def assemble_prompt(
     max_prompt_tokens: int = 10000,
     response_reserve_tokens: int = 2048,
     default_max_rows: int = 1000,
+    database_metadata: dict[str, str] | None = None,
 ) -> AssembledPrompt:
     """Build the complete LLM prompt following the four-section format.
 
     Policy rules and the user question are NEVER truncated.
     Schema is truncated (lowest-relevance first) if the token budget is tight.
+
+    When ``database_metadata`` is provided the system prompt includes a
+    DATABASE CONTEXT section listing each database and its SQL dialect so
+    the LLM can generate syntactically correct SQL without requiring the
+    caller to pre-select a single dialect.
     """
     # ── 1. System prompt ──────────────────────────────────────────────────
     max_rows = default_max_rows
@@ -157,8 +210,10 @@ def assemble_prompt(
         if tp.max_rows and tp.max_rows < max_rows:
             max_rows = tp.max_rows
 
+    database_context = _build_database_context(database_metadata or {})
+
     system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
-        dialect_hint=_DIALECT_NAMES.get(dialect, "PostgreSQL"),
+        database_context=database_context,
         max_rows=max_rows,
     )
 
@@ -175,7 +230,8 @@ def assemble_prompt(
         rules_section = ""
 
     # ── 3. Schema fragments ────────────────────────────────────────────────
-    table_ddls = generate_all_fragments(schema.tables, envelope, dialect)
+    table_ddls = generate_all_fragments(schema.tables, envelope, dialect,
+                                        database_metadata=database_metadata)
 
     # Budget calculation
     fixed_tokens = (
@@ -217,11 +273,32 @@ def assemble_prompt(
     schema_section = "\n".join(schema_lines)
 
     # ── 4. Question section ────────────────────────────────────────────────
-    dialect_name = _DIALECT_NAMES.get(dialect, "PostgreSQL")
-    dialect_extra = _DIALECT_HINTS.get(dialect, "")
-    footer = f"Generate a single valid {dialect_name} SELECT query using ONLY the tables and columns above."
-    if dialect_extra:
-        footer += f" {dialect_extra}"
+    # Build dialect-aware footer. When database_metadata is available, derive
+    # the hint from the databases in the schema rather than the pre-selected
+    # dialect parameter.
+    if database_metadata:
+        dialects_in_use = set(database_metadata.values())
+        if len(dialects_in_use) == 1:
+            d = next(iter(dialects_in_use))
+            dialect_label = _DIALECT_NAMES.get(
+                _DIALECT_STR_TO_ENUM.get(d, SQLDialect.POSTGRESQL), d.upper(),
+            )
+            footer = f"Generate a single valid {dialect_label} SELECT query using ONLY the tables and columns above."
+            hint = _DIALECT_HINTS.get(d, "")
+            if hint:
+                footer += f" {hint}"
+        else:
+            footer = (
+                "Generate a single valid SELECT query using ONLY the tables and columns above. "
+                "Use the correct SQL dialect for the database whose tables you reference."
+            )
+    else:
+        dialect_name = _DIALECT_NAMES.get(dialect, "PostgreSQL")
+        dialect_extra = _DIALECT_HINTS.get(dialect.value if hasattr(dialect, "value") else str(dialect), "")
+        footer = f"Generate a single valid {dialect_name} SELECT query using ONLY the tables and columns above."
+        if dialect_extra:
+            footer += f" {dialect_extra}"
+
     question_section = (
         f"=== USER QUESTION ===\n{sanitized_question}\n=== END USER QUESTION ===\n\n"
         f"{footer}"

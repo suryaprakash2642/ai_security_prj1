@@ -124,20 +124,24 @@ def run(parsed: ParsedSQL, envelope: PermissionEnvelope,
                     table=table_name,
                     detail=f"Table '{table_name}' requires aggregation_only (GROUP BY mandatory)",
                 ))
-            else:
-                # Verify no denied-in-select columns are in SELECT
-                pii_cols = {"mrn", "full_name", "ssn", "dob", "aadhaar_number",
-                            "phone", "email", "address", "patient_id"}
-                for col_table, col_name in parsed.select_columns:
-                    if col_name in pii_cols and table_id in (col_table or ""):
-                        violations.append(Violation(
-                            gate=1,
-                            code=ViolationCode.AGGREGATION_VIOLATION,
-                            severity=ViolationSeverity.CRITICAL,
-                            table=table_name,
-                            column=col_name,
-                            detail=f"Patient identifier '{col_name}' in SELECT with aggregation_only table",
-                        ))
+
+            # Verify no denied-in-select columns appear in SELECT.
+            # Use the policy-driven list from the envelope; fall back to a
+            # hardcoded PII safety net so new columns are still caught.
+            denied_cols = set(tp.denied_in_select) if tp.denied_in_select else set()
+            _PII_SAFETY_NET = {"mrn", "full_name", "ssn", "dob", "aadhaar_number",
+                               "phone", "email", "address", "patient_id"}
+            denied_cols |= _PII_SAFETY_NET
+            for col_table, col_name in parsed.select_columns:
+                if col_name in denied_cols:
+                    violations.append(Violation(
+                        gate=1,
+                        code=ViolationCode.AGGREGATION_VIOLATION,
+                        severity=ViolationSeverity.CRITICAL,
+                        table=table_name,
+                        column=col_name,
+                        detail=f"Patient identifier '{col_name}' in SELECT with aggregation_only table",
+                    ))
 
         # ── Row filter check (flag for rewriter) ──────────────────────────
         if tp.row_filters:

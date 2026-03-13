@@ -21,6 +21,25 @@ from app.models.enums import (
 from app.models.l4_models import PermissionEnvelope
 
 
+# ── Query enrichment output ──────────────────────────────────
+
+
+class EnrichedQuery(BaseModel):
+    """Output of the query enrichment stage (LLM + fallback)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    original_question: str
+    rewritten_query: str = ""
+    synonyms: list[str] = Field(default_factory=list)
+    table_hints: list[str] = Field(default_factory=list)
+    database_hints: list[str] = Field(default_factory=list)
+    domain_hints: list[str] = Field(default_factory=list)
+    entity_references: dict[str, str] = Field(default_factory=dict)
+    suggested_dialect: str | None = None
+    confidence: float = 0.0
+
+
 # ── Intent classification output ────────────────────────────
 
 
@@ -60,6 +79,7 @@ class CandidateTable(BaseModel):
     domain_affinity_score: float = 0.0
     intent_score: float = 0.0
     multi_strategy_bonus: float = 0.0
+    tfidf_score: float = 0.0
     final_score: float = 0.0
 
     # Provenance
@@ -108,6 +128,9 @@ class FilteredTable(BaseModel):
     row_filters: list[str] = Field(default_factory=list)
     aggregation_only: bool = False
     max_rows: int | None = None
+
+    # Dialect derived from the table's database FQN (e.g. "mysql", "postgresql")
+    dialect: str = ""
 
     # DDL fragment for LLM consumption
     ddl_fragment: str = ""
@@ -193,6 +216,14 @@ class RetrievalResult(BaseModel):
 
     # Security summary (no details about denied tables)
     denied_tables_count: int = 0
+
+    # Dialect detection (backend)
+    detected_dialect: str = "postgresql"
+    target_database: str = ""
+
+    # Per-database dialect map for L5 — lets the LLM see the dialect for
+    # every database in the result instead of forcing a single pre-selected one.
+    database_metadata: dict[str, str] = Field(default_factory=dict)
 
     # Pipeline metadata
     retrieval_metadata: RetrievalMetadata = Field(default_factory=RetrievalMetadata)

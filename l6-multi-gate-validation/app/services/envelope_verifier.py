@@ -20,8 +20,37 @@ logger = structlog.get_logger(__name__)
 ENVELOPE_TTL_SECONDS = 60
 
 
-def _compute_signature(envelope: PermissionEnvelope, signing_key: str) -> str:
-    payload = {
+def _compute_signature_candidates(envelope: PermissionEnvelope, signing_key: str) -> list[str]:
+
+    def _enum_or_str(value: object) -> str:
+        return str(getattr(value, "value", value))
+
+    compact_payload = {
+        "request_id": envelope.request_id,
+        "resolved_at": envelope.resolved_at,
+        "policy_version": envelope.policy_version,
+        "tables": [],
+    }
+
+    for tp in sorted(envelope.table_permissions, key=lambda t: t.table_id):
+        tp_dict = {
+            "id": tp.table_id,
+            "dec": _enum_or_str(tp.decision),
+            "cols": [
+                {"n": c.column_name, "v": _enum_or_str(c.visibility)}
+                for c in sorted(tp.columns, key=lambda x: x.column_name)
+            ],
+            "agg": tp.aggregation_only,
+            "rows": tp.max_rows,
+        }
+        if tp.row_filters:
+            tp_dict["rf"] = sorted(tp.row_filters)
+        compact_payload["tables"].append(tp_dict)
+
+    compact_bytes = json.dumps(compact_payload, separators=(",", ":"), sort_keys=True).encode()
+    compact_sig = hmac.new(signing_key.encode(), compact_bytes, hashlib.sha256).hexdigest()
+
+    legacy_payload = {
         "request_id": envelope.request_id,
         "table_permissions": [tp.model_dump() for tp in envelope.table_permissions],
         "join_restrictions": [jr.model_dump() for jr in envelope.join_restrictions],
@@ -29,8 +58,10 @@ def _compute_signature(envelope: PermissionEnvelope, signing_key: str) -> str:
         "resolved_at": envelope.resolved_at,
         "policy_version": envelope.policy_version,
     }
-    payload_bytes = json.dumps(payload, sort_keys=True, default=str).encode()
-    return hmac.new(signing_key.encode(), payload_bytes, hashlib.sha256).hexdigest()
+    legacy_bytes = json.dumps(legacy_payload, sort_keys=True, default=str).encode()
+    legacy_sig = hmac.new(signing_key.encode(), legacy_bytes, hashlib.sha256).hexdigest()
+
+    return [compact_sig, legacy_sig]
 
 
 def verify(envelope: PermissionEnvelope, signing_key: str,
@@ -46,8 +77,8 @@ def verify(envelope: PermissionEnvelope, signing_key: str,
             return True, ""
         return False, "Missing envelope signature"
 
-    expected = _compute_signature(envelope, signing_key)
-    if not hmac.compare_digest(expected, envelope.signature):
+    candidates = _compute_signature_candidates(envelope, signing_key)
+    if not any(hmac.compare_digest(expected, envelope.signature) for expected in candidates):
         logger.warning("Envelope signature mismatch", request_id=envelope.request_id)
         return False, "Invalid envelope signature"
 

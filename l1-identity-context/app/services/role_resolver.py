@@ -185,7 +185,10 @@ AD_TO_PIPELINE_ROLE: dict[str, str] = {
     "BILLING_CLERK":           "billing_staff",
     "REVENUE_CYCLE_ANALYST":   "revenue_manager",
     "REVENUE_CYCLE_MANAGER":   "revenue_manager",
-    "FINANCE_STAFF":           "billing_staff",
+    # FINANCE_STAFF is a hierarchy parent, not a billing role.
+    # It should NOT grant billing_staff access — otherwise
+    # Revenue_Cycle_Manager inherits BIZ-001 full column access,
+    # bypassing BIZ-010 aggregate-only constraint (spec §11.4).
 
     "HR_DIRECTOR":             "hospital_admin",
     "HR_MANAGER":              "hospital_admin",

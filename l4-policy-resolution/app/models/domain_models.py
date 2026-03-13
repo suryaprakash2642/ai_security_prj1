@@ -16,9 +16,10 @@ class ConditionNode(BaseModel):
     model_config = ConfigDict(extra="ignore")
     
     condition_id: str
-    condition_type: str = Field(..., description="ROW_FILTER | MASKING_RULE | JOIN_RESTRICTION | AGGREGATION")
+    condition_type: str = Field(..., description="ROW_FILTER | MASKING_RULE | JOIN_RESTRICTION | AGGREGATION_ONLY")
     expression: str = Field(..., description="The parameter-injected string (e.g. department_id = $dept)")
     parameters_required: list[str] = Field(default_factory=list)
+    parameters: str = Field(default="", description="JSON string with structured condition parameters from Neo4j")
 
 
 class PolicyNode(BaseModel):

@@ -19,6 +19,8 @@ from app.services.context_assembler import ContextAssembler
 from app.services.embedding_engine import EmbeddingEngine
 from app.services.intent_classifier import IntentClassifier
 from app.services.join_graph import JoinGraphBuilder
+from app.services.dialect_detector import DialectDetector
+from app.services.query_enrichment import QueryEnrichmentService
 from app.services.ranking_engine import RankingEngine
 from app.services.rbac_filter import RBACFilter
 from app.services.retrieval_pipeline import RetrievalPipeline
@@ -44,6 +46,8 @@ class Container:
         self.intent_classifier = IntentClassifier()
         self.ranking_engine = RankingEngine()
         self.context_assembler = ContextAssembler()
+        self.enrichment_service = QueryEnrichmentService(settings)
+        self.dialect_detector = DialectDetector()
 
         self.embedding_engine = EmbeddingEngine(
             settings=settings,
@@ -84,6 +88,8 @@ class Container:
             column_scoper=self.column_scoper,
             join_graph_builder=self.join_graph_builder,
             context_assembler=self.context_assembler,
+            enrichment_service=self.enrichment_service,
+            dialect_detector=self.dialect_detector,
         )
 
     async def startup(self) -> None:
@@ -94,11 +100,27 @@ class Container:
         await self.l2_client.connect()
         await self.l4_client.connect()
         await self.vector_client.connect()
+        await self.enrichment_service.connect()
+
+        # Load database catalog from L2 graph for dynamic enrichment + dialect detection
+        try:
+            databases = await self.l2_client.get_all_databases()
+            await self.enrichment_service.load_catalog(databases)
+            self.dialect_detector.load_catalog(databases)
+            logger.info("database_catalog_loaded", count=len(databases))
+        except Exception as exc:
+            logger.warning(
+                "database_catalog_load_failed",
+                error=str(exc),
+                note="Enrichment and dialect detection will use defaults",
+            )
+
         logger.info("container_started")
 
     async def shutdown(self) -> None:
         """Gracefully disconnect all infrastructure."""
         logger.info("container_shutting_down")
+        await self.enrichment_service.close()
         await self.vector_client.close()
         await self.l4_client.close()
         await self.l2_client.close()

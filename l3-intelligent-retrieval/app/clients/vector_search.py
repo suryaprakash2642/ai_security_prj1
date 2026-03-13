@@ -29,8 +29,8 @@ class VectorSearchClient:
             from sqlalchemy.ext.asyncio import create_async_engine
 
             kwargs: dict[str, Any] = {
-                "pool_size": 5,
-                "max_overflow": 10,
+                "pool_size": 2,
+                "max_overflow": 3,
                 "pool_timeout": 10,
             }
             if self._settings.pgvector_ssl:
@@ -59,10 +59,13 @@ class VectorSearchClient:
         top_k: int = 15,
         min_similarity: float = 0.35,
         entity_type: str | None = None,
+        database_names: list[str] | None = None,
     ) -> list[L2VectorSearchResult]:
         """Perform cosine similarity search over embedded schema metadata.
 
         Uses pgvector's <=> operator for cosine distance.
+        When database_names is provided, filters to only those databases
+        BEFORE computing similarity — avoiding irrelevant cross-database matches.
         """
         if not self._engine:
             logger.warning("pgvector_not_available")
@@ -78,6 +81,7 @@ class VectorSearchClient:
             embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
             type_filter = ""
+            db_filter = ""
             params: dict[str, Any] = {
                 "embedding": embedding_str,
                 "top_k": top_k,
@@ -88,12 +92,17 @@ class VectorSearchClient:
                 type_filter = "AND entity_type = :etype"
                 params["etype"] = entity_type
 
+            if database_names:
+                db_filter = "AND database_name = ANY(:db_names)"
+                params["db_names"] = database_names
+
             query = text(f"""
                 SELECT entity_fqn, source_text, entity_type,
                        1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
                 FROM schema_embeddings
                 WHERE is_active = true
                   {type_filter}
+                  {db_filter}
                   AND 1 - (embedding <=> CAST(:embedding AS vector)) >= :min_sim
                 ORDER BY embedding <=> CAST(:embedding AS vector)
                 LIMIT :top_k

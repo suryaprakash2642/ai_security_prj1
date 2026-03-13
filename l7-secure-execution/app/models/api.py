@@ -27,6 +27,7 @@ class TablePermission(BaseModel):
     nl_rules: list[str] = []
     max_rows: int | None = None
     aggregation_only: bool = False
+    denied_in_select: list[str] = []
 
 
 class JoinRestriction(BaseModel):

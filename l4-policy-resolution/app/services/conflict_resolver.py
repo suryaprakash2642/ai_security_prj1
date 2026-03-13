@@ -33,24 +33,38 @@ class ConflictResolver:
 
         # Sort policies by priority DESC
         sorted_pols = sorted(table_meta.table_policies, key=lambda p: p.priority, reverse=True)
-        
-        # Rule 1: Highest priority wins. If identical priorities conflict, DENY beats ALLOW.
-        best_priority = sorted_pols[0].priority
-        top_tier = [p for p in sorted_pols if p.priority == best_priority]
-        
-        has_allow = any(p.is_allow for p in top_tier)
-        has_deny = any(p.is_deny for p in top_tier)
-        
-        if has_deny:
-            active = [p for p in top_tier if p.is_deny]
-            return TableDecision.DENY, active, f"Hard DENY applied via top-priority policy ({active[0].policy_id})"
-            
-        if has_allow:
-            active = [p for p in top_tier if p.is_allow]
-            # Accumulate all filters / rule conditions from all allowed policies in the top tier (or lower tiers if cumulative)
-            # For strict deny-wins, we return all ALLOW policies that don't contradict.
-            all_allows = [p for p in sorted_pols if p.is_allow]
-            return TableDecision.ALLOW, all_allows, f"ALLOW via policy ({active[0].policy_id})"
+
+        # At the table level, DENY and ALLOW are the only access decisions.
+        # FILTER and MASK are condition modifiers that imply table access is
+        # granted (with constraints).  They must not shadow an ALLOW that
+        # sits at a lower priority.
+        #
+        # Strategy: scan ALL policies (not just the top tier) for the
+        # highest-priority DENY and the highest-priority "grants access"
+        # (ALLOW / FILTER / MASK).  DENY beats grant at equal priority.
+        _GRANT_EFFECTS = {"ALLOW", "FILTER", "MASK"}
+
+        best_deny_prio = None
+        best_grant_prio = None
+        for p in sorted_pols:
+            eff = p.effect.upper()
+            if eff == "DENY" and best_deny_prio is None:
+                best_deny_prio = p.priority
+            if eff in _GRANT_EFFECTS and best_grant_prio is None:
+                best_grant_prio = p.priority
+
+        # If there is a DENY at equal or higher priority than any grant, deny.
+        if best_deny_prio is not None:
+            if best_grant_prio is None or best_deny_prio >= best_grant_prio:
+                active = [p for p in sorted_pols if p.is_deny and p.priority == best_deny_prio]
+                return TableDecision.DENY, active, f"Hard DENY applied via top-priority policy ({active[0].policy_id})"
+
+        # If any grant exists, allow.  Collect ALL granting policies so
+        # their conditions (row filters, masks, etc.) are applied.
+        if best_grant_prio is not None:
+            all_grants = [p for p in sorted_pols if p.effect.upper() in _GRANT_EFFECTS]
+            leading = next(p for p in sorted_pols if p.effect.upper() in _GRANT_EFFECTS)
+            return TableDecision.ALLOW, all_grants, f"ALLOW via policy ({leading.policy_id})"
 
         return TableDecision.DENY, [], "No valid ALLOW or DENY effect found"
 

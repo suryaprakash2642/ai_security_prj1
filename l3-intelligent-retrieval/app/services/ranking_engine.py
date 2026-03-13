@@ -12,11 +12,14 @@ Includes:
 
 from __future__ import annotations
 
+import math
+import re
+
 import structlog
 
 from app.config import load_ranking_weights
 from app.models.enums import DomainHint, QueryIntent
-from app.models.retrieval import CandidateTable, IntentResult
+from app.models.retrieval import CandidateTable, EnrichedQuery, IntentResult
 
 logger = structlog.get_logger(__name__)
 
@@ -35,6 +38,7 @@ class RankingEngine:
         candidates: list[CandidateTable],
         intent: IntentResult,
         accessible_domains: set[str],
+        enriched: EnrichedQuery | None = None,
     ) -> list[CandidateTable]:
         """Score and rank candidates using composite scoring model.
 
@@ -42,15 +46,21 @@ class RankingEngine:
             candidates: Pre-fusion candidate tables
             intent: Classified intent with domain hints
             accessible_domains: Domains the user can access
+            enriched: Optional enrichment data for TF-IDF scoring
 
         Returns:
             Candidates sorted by final_score descending.
         """
-        w_semantic = self._scoring.get("semantic_similarity", 0.50)
+        # Apply TF-IDF reranking if enrichment available
+        if enriched:
+            self._apply_tfidf_rerank(candidates, enriched)
+
+        w_semantic = self._scoring.get("semantic_similarity", 0.40)
         w_domain = self._scoring.get("domain_affinity", 0.20)
         w_intent = self._scoring.get("intent_match", 0.15)
         w_join = self._scoring.get("join_connectivity", 0.10)
         w_multi = self._scoring.get("multi_strategy_bonus", 0.05)
+        w_tfidf = self._scoring.get("tfidf_score", 0.10)
 
         universal_anchors = set(
             self._domain_config.get("universal_anchors", ["patients", "encounters", "providers"])
@@ -87,15 +97,6 @@ class RankingEngine:
                 c.domain_affinity_score = max(c.domain_affinity_score, 0.8)
                 c.domain_affinity_score += anchor_boost
 
-            # For aggregate/trend queries, boost domain_affinity of fact/summary tables
-            # so they rank above raw transactional tables.
-            if _has_aggregate_signal:
-                name_lower = c.table_name.lower()
-                _fact_keywords = ("summary", "summaries", "stats", "statistics",
-                                   "metric", "metrics", "analytics", "fact_", "_facts")
-                if any(kw in name_lower for kw in _fact_keywords):
-                    c.domain_affinity_score = min(c.domain_affinity_score + 0.35, 1.0)
-
             # Intent-specific scoring
             intent_score = self._compute_intent_score(c, intent)
             c.intent_score = intent_score
@@ -117,6 +118,7 @@ class RankingEngine:
                 + c.intent_score * w_intent
                 + join_score * w_join
                 + c.multi_strategy_bonus * w_multi
+                + c.tfidf_score * w_tfidf
             )
 
             c.final_score = round(raw_score * protection_factor, 4)
@@ -137,14 +139,9 @@ class RankingEngine:
         desc = candidate.description.lower()
 
         if intent.intent == QueryIntent.AGGREGATION:
-            # Boost fact/summary/analytics tables — include plural forms like
-            # 'summaries' which don't contain 'summary' as a substring.
-            _fact_kws = ("fact_", "_facts", "summary", "summaries",
-                         "stats", "statistics", "metric", "metrics", "analytics")
-            if any(kw in name for kw in _fact_kws):
-                score += rules.get("fact_table_boost", 0.35)
-            if any(kw in name for kw in ["dim_", "lookup", "reference"]):
-                score += rules.get("dimension_table_boost", 0.10)
+            # Let semantic + TF-IDF scoring handle table relevance.
+            # No hardcoded table-name boosts — keeps scoring table-agnostic.
+            pass
 
         elif intent.intent == QueryIntent.TREND:
             # Boost tables with time columns
@@ -171,3 +168,62 @@ class RankingEngine:
                     break
 
         return min(score, 1.0)
+
+    # ── TF-IDF reranking ────────────────────────────────────
+
+    def _apply_tfidf_rerank(
+        self,
+        candidates: list[CandidateTable],
+        enriched: EnrichedQuery,
+    ) -> None:
+        """Score candidates using manual TF-IDF against enrichment terms."""
+        if not candidates:
+            return
+
+        # Build query terms from enrichment
+        query_terms: list[str] = []
+        query_terms.extend(self._tokenize(enriched.original_question))
+        for syn in enriched.synonyms:
+            query_terms.extend(self._tokenize(syn))
+        for hint in enriched.table_hints:
+            query_terms.extend(self._tokenize(hint))
+
+        if not query_terms:
+            return
+
+        # Build document corpus from candidate descriptions + table names
+        docs: list[set[str]] = []
+        for c in candidates:
+            tokens = set(self._tokenize(c.description)) | set(self._tokenize(c.table_name))
+            docs.append(tokens)
+
+        n_docs = len(docs)
+
+        # Compute IDF for each query term
+        idf: dict[str, float] = {}
+        for term in set(query_terms):
+            doc_freq = sum(1 for d in docs if term in d)
+            idf[term] = math.log((n_docs + 1) / (doc_freq + 1)) + 1.0
+
+        # Score each candidate
+        for i, c in enumerate(candidates):
+            doc_tokens = docs[i]
+            if not doc_tokens:
+                continue
+
+            score = 0.0
+            for term in set(query_terms):
+                if term in doc_tokens:
+                    tf = 1.0  # Binary TF (present or not)
+                    score += tf * idf.get(term, 1.0)
+
+            # Normalize to 0-1 range
+            max_possible = sum(idf.get(t, 1.0) for t in set(query_terms))
+            c.tfidf_score = min(score / max_possible, 1.0) if max_possible > 0 else 0.0
+
+    @staticmethod
+    def _tokenize(text: str) -> list[str]:
+        """Simple tokenizer: lowercase, split on non-alphanumeric, filter short tokens."""
+        if not text:
+            return []
+        return [t for t in re.split(r'[^a-z0-9]+', text.lower()) if len(t) >= 2]

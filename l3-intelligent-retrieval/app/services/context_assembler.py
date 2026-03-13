@@ -113,6 +113,7 @@ class ContextAssembler:
             filtered_schema=final_tables,
             join_graph=join_graph,
             nl_policy_rules=nl_rules,
+            permission_envelope=envelope,
             denied_tables_count=denied_count,
             retrieval_metadata=metadata,
             resolved_at=datetime.now(UTC),

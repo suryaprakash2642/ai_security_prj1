@@ -27,6 +27,7 @@ class TablePermission(BaseModel):
     columns: list[ColumnDecision] = Field(default_factory=list)
     row_filters: list[str] = Field(default_factory=list)
     aggregation_only: bool = False
+    denied_in_select: list[str] = Field(default_factory=list, description="Columns forbidden in SELECT under aggregation_only")
     max_rows: int | None = None
     nl_rules: list[str] = Field(default_factory=list)
     reason: str = ""

@@ -79,6 +79,20 @@ class L2ForeignKey(BaseModel):
         return self
 
 
+class L2DatabaseInfo(BaseModel):
+    """Database metadata from L2 Knowledge Graph."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    engine: str = "postgresql"
+    description: str = ""
+    host: str = ""
+    port: int = 0
+    table_count: int = 0
+    domains: list[str] = Field(default_factory=list)
+
+
 class L2RoleDomainAccess(BaseModel):
     """Domain access for a role, from L2."""
 
