@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     # PostgreSQL audit
     pg_audit_dsn: str = "postgresql+asyncpg://l2_admin:changeme123@localhost:5432/l2_audit"
     pg_audit_ca_cert_path: str = ""
+    pg_ssl: bool = True
     pg_pool_min: int = 2
     pg_pool_max: int = 4
 

@@ -26,7 +26,7 @@ async def get_all_databases(
         return APIResponse(data=cached)
 
     databases = await container.graph_reader.get_all_databases()
-    await container.cache.set("databases:all", databases, ttl=300)
+    await container.cache.set("databases:all", databases)
     return APIResponse(data=databases, meta={"count": len(databases)})
 
 

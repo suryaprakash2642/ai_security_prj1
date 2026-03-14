@@ -1700,9 +1700,11 @@ async def diff_and_apply_graph(
                 engine_map = {
                     "postgresql": "POSTGRESQL",
                     "timescale_postgresql": "POSTGRESQL",
+                    "mysql": "MYSQL",
+                    "mariadb": "MYSQL",
                     "sqlserver": "SQLSERVER",
                     "oracle": "ORACLE",
-                    "mongodb": "MONGODB"
+                    "mongodb": "MONGODB",
                 }
                 engine_enum = engine_map.get(engine.lower(), "POSTGRESQL")
 

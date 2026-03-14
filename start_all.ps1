@@ -43,10 +43,10 @@ if (Test-Path $envFile) {
 }
 
 # -- Override inter-service URLs and Redis for local dev -----
-$env:REDIS_URL        = 'redis://localhost:6379/0'
-$env:L1_REDIS_URL     = 'redis://localhost:6379/0'
-$env:L2_REDIS_URL     = 'redis://localhost:6379/1'
-$env:L3_REDIS_URL     = 'redis://localhost:6379/1'
+$env:REDIS_URL        = 'redis://:dj5Q0zOOQst62LGwNHvfnxZ3PIu7qtAE@redis-10791.crce219.us-east-1-4.ec2.cloud.redislabs.com:10791/0'
+$env:L1_REDIS_URL     = 'redis://:dj5Q0zOOQst62LGwNHvfnxZ3PIu7qtAE@redis-10791.crce219.us-east-1-4.ec2.cloud.redislabs.com:10791/0'
+$env:L2_REDIS_URL     = 'redis://:dj5Q0zOOQst62LGwNHvfnxZ3PIu7qtAE@redis-10791.crce219.us-east-1-4.ec2.cloud.redislabs.com:10791/0'
+$env:L3_REDIS_URL     = 'redis://:dj5Q0zOOQst62LGwNHvfnxZ3PIu7qtAE@redis-10791.crce219.us-east-1-4.ec2.cloud.redislabs.com:10791/0'
 $env:L3_L2_BASE_URL   = 'http://localhost:8002'
 $env:L3_L4_BASE_URL   = 'http://localhost:8400'
 $env:L8_AUDIT_URL     = 'http://localhost:8800'

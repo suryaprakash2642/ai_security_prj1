@@ -195,6 +195,25 @@ class PolicyOrchestrator:
 
                 total_policies_seen += len(meta.table_policies)
 
+                # Clearance-level gating: user.clearance_level >= table.sensitivity_level
+                user_clearance = request.user_context.get("clearance_level", 1)
+                table_sensitivity = meta.sensitivity_level
+                if user_clearance < table_sensitivity:
+                    envelope.table_permissions.append(
+                        TablePermission(
+                            table_id=table_id,
+                            decision=TableDecision.DENY,
+                            reason=f"Clearance insufficient (user={user_clearance}, required={table_sensitivity})",
+                        )
+                    )
+                    if trace_log is not None:
+                        trace_log.append({
+                            "table_id": table_id,
+                            "decision": "DENY",
+                            "reason": f"Clearance gating: {user_clearance} < {table_sensitivity}",
+                        })
+                    continue
+
                 # Table-Level Resolution
                 decision, active_policies, reason = ConflictResolver.resolve_table(meta)
 
@@ -233,7 +252,17 @@ class PolicyOrchestrator:
                         table_perm.row_filters = [f"(mrn = '{btg.patient_mrn}')"]
                     else:
                         # Row-Level & Constraint Aggregation
-                        aggregator.aggregate_table_conditions(active_policies, table_perm)
+                        table_col_names = {cm.column_name for cm in meta.columns.values()} if meta else set()
+                        aggregator.aggregate_table_conditions(active_policies, table_perm, table_col_names)
+
+                        # Facility-scoped row filter: inject facility_id filter
+                        # when the table has a facility_id column and the user
+                        # has a facility_id in their context.
+                        user_facility = request.user_context.get("facility_id", "")
+                        if user_facility and "facility_id" in table_col_names:
+                            facility_filter = f"facility_id = '{user_facility}'"
+                            if facility_filter not in table_perm.row_filters:
+                                table_perm.row_filters.append(facility_filter)
 
                     # Enforce denied_in_select at the column level: mark those
                     # columns HIDDEN so they never appear in the schema sent to

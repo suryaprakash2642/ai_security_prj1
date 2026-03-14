@@ -114,6 +114,24 @@ class GraphClient:
                 })
         return policies
 
+    async def get_table_properties(self, table_ids: list[str]) -> dict[str, dict]:
+        """Fetch table-level properties (sensitivity_level, domain, facility scope) for clearance gating."""
+        query = """
+        UNWIND $table_ids AS tid
+        MATCH (t:Table {table_id: tid})
+        OPTIONAL MATCH (t)-[:BELONGS_TO_DOMAIN]->(d:Domain)
+        RETURN tid, t.sensitivity_level AS sensitivity_level, d.name AS domain
+        """
+        result: dict[str, dict] = {}
+        async with self._driver.session() as session:
+            res = await session.run(query, table_ids=table_ids)
+            async for record in res:
+                result[record["tid"]] = {
+                    "sensitivity_level": record["sensitivity_level"] or 1,
+                    "domain": record["domain"] or "",
+                }
+        return result
+
     async def get_all_table_columns(self, table_ids: list[str]) -> list[dict]:
         """Fetch all column definitions for the given tables regardless of attached policies.
 

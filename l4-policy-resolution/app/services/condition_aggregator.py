@@ -92,9 +92,48 @@ class ConditionAggregator:
                                raw=condition.parameters)
         return {}
 
-    def aggregate_table_conditions(self, active_policies: list[PolicyNode], table_perm: TablePermission) -> None:
-        """Modifies table_perm in place by appending resolved conditions."""
-        
+    @staticmethod
+    def _filter_references_valid_columns(expression: str, table_columns: set[str]) -> bool:
+        """Check that column names referenced in a ROW_FILTER exist in the table.
+
+        Extracts bare identifiers from the expression (left-hand side of ``=``,
+        ``IN``, ``LIKE``, etc.) and verifies at least one belongs to the
+        target table.  If *none* of the referenced columns exist in the table,
+        the filter is inapplicable and should be skipped.
+        """
+        if not table_columns:
+            # No column info available — apply the filter as-is (safe default)
+            return True
+
+        # Extract identifiers that look like column references.
+        # We look for bare words on the left side of operators.
+        col_refs = re.findall(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b", expression)
+        # Exclude SQL keywords and literal values
+        _SQL_KEYWORDS = {
+            "AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE", "BETWEEN",
+            "TRUE", "FALSE", "SELECT", "FROM", "WHERE", "EXISTS",
+        }
+        candidate_cols = {
+            c for c in col_refs
+            if c.upper() not in _SQL_KEYWORDS
+            and not c.startswith("'") and not c.isdigit()
+        }
+        # At least one referenced column must exist in the table
+        return bool(candidate_cols & table_columns)
+
+    def aggregate_table_conditions(
+        self,
+        active_policies: list[PolicyNode],
+        table_perm: TablePermission,
+        table_columns: set[str] | None = None,
+    ) -> None:
+        """Modifies table_perm in place by appending resolved conditions.
+
+        Args:
+            table_columns: Set of actual column names in the target table.
+                           When provided, row filters referencing columns not
+                           present in the table are skipped.
+        """
         row_filters = set()
         aggregation_only = False
         denied_in_select: set[str] = set()
@@ -104,6 +143,15 @@ class ConditionAggregator:
             for c in p.conditions:
                 if c.condition_type == "ROW_FILTER":
                     injected = self._inject_parameters(c.expression)
+                    # Skip filters that reference columns not in this table
+                    if table_columns and not self._filter_references_valid_columns(injected, table_columns):
+                        logger.info(
+                            "skipping_inapplicable_row_filter",
+                            policy_id=p.policy_id,
+                            expression=c.expression,
+                            table_id=table_perm.table_id,
+                        )
+                        continue
                     row_filters.add(f"({injected})")
 
                 elif c.condition_type in ("AGGREGATE_ONLY", "AGGREGATION_ONLY"):

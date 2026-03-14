@@ -117,19 +117,24 @@ class ExecutionResponse(BaseModel):
 # ── Audit Event (emitted to L8) ────────────────────────────────────────────
 
 class ExecutionAuditEvent(BaseModel):
-    event_type: str = "EXECUTION"
+    event_id: str = ""
+    event_type: str = "QUERY_EXECUTED"
+    source_layer: str = "L7"
+    severity: str = "INFO"
     request_id: str
     user_id: str
     session_id: str
-    database: str
-    sql_executed: str
-    dialect: str
-    rows_returned: int
-    execution_time_ms: float
+    timestamp: str = ""
+    payload: dict[str, Any] = {}
+    # Legacy fields kept for backward compat — also packed into payload
+    database: str = ""
+    sql_executed: str = ""
+    dialect: str = ""
+    rows_returned: int = 0
+    execution_time_ms: float = 0.0
     resource_usage: dict[str, Any] = {}
     sanitization_events: int = 0
     btg_active: bool = False
     truncated: bool = False
-    status: str
+    status: str = ""
     audit_flags: list[str] = []
-    timestamp: str = ""

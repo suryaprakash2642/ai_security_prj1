@@ -38,9 +38,9 @@ class EmbeddingPipeline:
         import ssl as _ssl
         dsn = self._settings.pg_vector_dsn
         clean_dsn = dsn.split("?")[0] if "?" in dsn else dsn
-        is_remote = "localhost" not in clean_dsn and "127.0.0.1" not in clean_dsn
+        use_ssl = self._settings.pg_ssl and "localhost" not in clean_dsn and "127.0.0.1" not in clean_dsn
         connect_args: dict[str, Any] = {}
-        if is_remote:
+        if use_ssl:
             ssl_ctx = _ssl.create_default_context()
             ssl_ctx.check_hostname = False
             ssl_ctx.verify_mode = _ssl.CERT_NONE

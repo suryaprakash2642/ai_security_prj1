@@ -68,17 +68,20 @@ async def _execute_postgresql(
     timeout_seconds: int,
     settings: Settings,
 ) -> tuple[list[ColumnMetadata], list[list[Any]], bool]:
-    """Execute SQL against Aiven PostgreSQL."""
-    ssl_ctx = ssl.create_default_context()
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
-
+    """Execute SQL against PostgreSQL."""
     dsn = (
         f"postgresql://{settings.postgres_user}:{settings.postgres_password}"
         f"@{settings.postgres_host}:{settings.postgres_port}/{dbname}"
     )
 
-    conn = await asyncpg.connect(dsn, ssl=ssl_ctx, timeout=timeout_seconds)
+    connect_kwargs: dict[str, Any] = {"timeout": timeout_seconds}
+    if settings.postgres_sslmode and settings.postgres_sslmode != "disable":
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        connect_kwargs["ssl"] = ssl_ctx
+
+    conn = await asyncpg.connect(dsn, **connect_kwargs)
     try:
         # Use conn.fetch() directly — no prepared statement issues
         records = await asyncio.wait_for(

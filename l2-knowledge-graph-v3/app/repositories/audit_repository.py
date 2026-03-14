@@ -36,8 +36,8 @@ class AuditRepository:
         # For remote hosts (e.g. Timescale Cloud) strip it from the DSN and
         # pass a proper SSL context via connect_args instead.
         clean_dsn = dsn.split("?")[0] if "?" in dsn else dsn
-        is_remote = "localhost" not in clean_dsn and "127.0.0.1" not in clean_dsn
-        if is_remote:
+        use_ssl = self._settings.pg_ssl and "localhost" not in clean_dsn and "127.0.0.1" not in clean_dsn
+        if use_ssl:
             # For cloud-hosted PostgreSQL (Aiven, Timescale, etc.), use SSL.
             # Use pinned CA only when explicitly configured; otherwise fall back
             # to permissive SSL for environments with self-signed chains.

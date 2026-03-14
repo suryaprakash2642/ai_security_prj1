@@ -34,6 +34,7 @@ class PolicyCollector:
         table_raw_policies = await self._client.get_table_policies(table_ids, effective_roles)
         column_raw_policies = await self._client.get_column_policies(table_ids, effective_roles)
         all_columns = await self._client.get_all_table_columns(table_ids)
+        table_props = await self._client.get_table_properties(table_ids)
 
         # Assemble the structured objects
         tables: dict[str, TableMetadata] = {}
@@ -91,5 +92,13 @@ class PolicyCollector:
         for tid in table_ids:
             if tid not in tables:
                 tables[tid] = TableMetadata(table_id=tid, table_name=tid.split(".")[-1] if "." in tid else tid)
+
+        # Populate table-level properties (sensitivity_level, domain) from Neo4j
+        for tid, props in table_props.items():
+            if tid in tables:
+                tables[tid].sensitivity_level = props.get("sensitivity_level", 1)
+                domain = props.get("domain", "")
+                if domain and domain not in tables[tid].domain_tags:
+                    tables[tid].domain_tags.append(domain)
 
         return tables

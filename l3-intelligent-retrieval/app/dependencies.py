@@ -103,17 +103,27 @@ class Container:
         await self.enrichment_service.connect()
 
         # Load database catalog from L2 graph for dynamic enrichment + dialect detection
-        try:
-            databases = await self.l2_client.get_all_databases()
-            await self.enrichment_service.load_catalog(databases)
-            self.dialect_detector.load_catalog(databases)
-            logger.info("database_catalog_loaded", count=len(databases))
-        except Exception as exc:
-            logger.warning(
-                "database_catalog_load_failed",
-                error=str(exc),
-                note="Enrichment and dialect detection will use defaults",
-            )
+        # Retry a few times since L2 may still be starting up
+        import asyncio
+        catalog_loaded = False
+        for attempt in range(5):
+            try:
+                databases = await self.l2_client.get_all_databases()
+                await self.enrichment_service.load_catalog(databases)
+                self.dialect_detector.load_catalog(databases)
+                logger.info("database_catalog_loaded", count=len(databases))
+                catalog_loaded = True
+                break
+            except Exception as exc:
+                if attempt < 4:
+                    logger.info("catalog_load_retry", attempt=attempt + 1, error=str(exc))
+                    await asyncio.sleep(3)
+                else:
+                    logger.warning(
+                        "database_catalog_load_failed",
+                        error=str(exc),
+                        note="Enrichment and dialect detection will use defaults",
+                    )
 
         logger.info("container_started")
 

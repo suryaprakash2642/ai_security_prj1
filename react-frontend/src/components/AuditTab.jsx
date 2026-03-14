@@ -12,19 +12,26 @@ export default function AuditTab() {
 
   async function search() {
     setLoading(true)
-    const params = new URLSearchParams()
-    if (layer) params.set('layer', layer)
-    if (severity) params.set('severity', severity)
-    if (userId) params.set('user_id', userId)
-    params.set('limit', '50')
-    const r = await apiFetch(`${API.L8}/api/v1/audit/query?${params}`)
-    setResults(r.ok ? (r.data.entries || r.data.logs || r.data || []) : [])
+    const body = {
+      filters: {},
+      pagination: { offset: 0, limit: 50 },
+      sort: { field: 'timestamp', order: 'desc' },
+    }
+    if (layer) body.filters.source_layer = [layer]
+    if (severity) body.filters.severity = [severity]
+    if (userId) body.filters.user_id = userId
+    const r = await apiFetch(`${API.L8}/api/v1/audit/query`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    setResults(r.ok ? (r.data.events || r.data.entries || r.data.logs || []) : [])
     setLoading(false)
   }
 
   async function verifyChain() {
     setLoading(true)
-    const r = await apiFetch(`${API.L8}/api/v1/audit/verify-chain`)
+    const target = layer || 'L7'
+    const r = await apiFetch(`${API.L8}/api/v1/audit/integrity/${target}`)
     setChainResult(r.data)
     setLoading(false)
   }
@@ -79,7 +86,7 @@ export default function AuditTab() {
               <div key={i} className="audit-row">
                 <div className="audit-row-header" onClick={() => setOpenRows(o => ({ ...o, [i]: !o[i] }))}>
                   <span style={{ color: sevColor, fontSize: 11, fontWeight: 700, minWidth: 60 }}>{e.severity || 'INFO'}</span>
-                  {e.layer && <span className={`ltag ltag-${e.layer.toLowerCase()}`}>{e.layer}</span>}
+                  {(e.source_layer || e.layer) && <span className={`ltag ltag-${(e.source_layer || e.layer).toLowerCase()}`}>{e.source_layer || e.layer}</span>}
                   <span style={{ fontSize: 12, flex: 1 }}>{e.action || e.event_type || 'Event'}</span>
                   <span style={{ fontSize: 11, color: 'var(--text3)' }}>{e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</span>
                   <span style={{ fontSize: 10, color: 'var(--text3)' }}>{isOpen ? '▲' : '▼'}</span>

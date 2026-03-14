@@ -6,11 +6,14 @@ import AlertsTab from './components/AlertsTab.jsx'
 import ReportsTab from './components/ReportsTab.jsx'
 import { useToast } from './useToast.jsx'
 import { usePipeline } from './hooks/usePipeline.js'
+import { useTheme } from './hooks/useTheme.js'
 
 export default function App() {
   const { toast, ToastContainer } = useToast()
   const { auth, layerStates, pipelineState, handleLogin, handleLogout, runPipeline } = usePipeline(toast)
+  const { theme, toggleTheme } = useTheme()
   const [tab, setTab] = useState('query')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const tabs = [
     { id: 'query',   label: '🔍 Query' },
@@ -19,9 +22,14 @@ export default function App() {
     { id: 'reports', label: '📊 Reports' },
   ]
 
+  const closeSidebar = () => setSidebarOpen(false)
+
   return (
     <div className="app-shell">
       <header className="topbar">
+        <button className="menu-toggle" onClick={() => setSidebarOpen(o => !o)}>
+          {sidebarOpen ? '✕' : '☰'}
+        </button>
         <div className="topbar-logo">
           <div className="topbar-logo-icon">🏥</div>
           <div>
@@ -35,10 +43,14 @@ export default function App() {
             ? <span className="chip chip-green">✓ {auth.user_id}</span>
             : <span className="chip chip-red">Not Authenticated</span>}
           {pipelineState.running && <span className="chip chip-blue"><span className="spinner" /> Running</span>}
+          <button className="theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
         </div>
       </header>
 
-      <Sidebar auth={auth} onLogin={handleLogin} onLogout={handleLogout} layerStates={layerStates} />
+      <div className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`} onClick={closeSidebar} />
+      <Sidebar auth={auth} onLogin={handleLogin} onLogout={handleLogout} layerStates={layerStates} className={sidebarOpen ? 'open' : ''} />
 
       <main className="main">
         <div className="tabs">

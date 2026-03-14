@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { HEALTH_ENDPOINTS, LAYERS, apiFetch } from '../config.js'
 
-export default function Sidebar({ auth, onLogin, onLogout, layerStates }) {
+export default function Sidebar({ auth, onLogin, onLogout, layerStates, className = '' }) {
   const [userKey, setUserKey] = useState('physician')
   const [loggingIn, setLoggingIn] = useState(false)
   const [health, setHealth] = useState({})
@@ -29,7 +29,7 @@ export default function Sidebar({ auth, onLogin, onLogout, layerStates }) {
   }
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${className}`}>
       {/* Identity / Login */}
       <div>
         <div className="sidebar-section-label">Identity — L1</div>

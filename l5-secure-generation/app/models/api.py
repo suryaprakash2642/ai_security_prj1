@@ -117,7 +117,9 @@ class FilteredTable(BaseModel):
 
     @property
     def name(self) -> str:
-        return self.table_name or self.table_id
+        raw = self.table_name or self.table_id
+        # Always return the short table name (last segment of FQN)
+        return raw.split(".")[-1] if "." in raw else raw
 
 
 class FilteredSchema(BaseModel):

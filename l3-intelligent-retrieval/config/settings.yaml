@@ -52,7 +52,7 @@ redis:
 
 pgvector:
   dsn: ""  # Set via L3_PGVECTOR_DSN or PG_VECTOR_DSN env var
-  ssl: true
+  ssl: false
 
 metrics:
   enabled: true
