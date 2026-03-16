@@ -611,6 +611,42 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .auth-panel .k { color: var(--blue-light); font-weight: 600; }
 
+/* ── Break-the-Glass ────────────────────────────────────── */
+.btg-active-panel {
+  background: rgba(200,16,46,0.1);
+  border: 1px solid rgba(200,16,46,0.4);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.btg-active-badge {
+  display: inline-block;
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 3px 10px;
+  border-radius: 4px;
+  animation: btg-pulse 1.5s ease-in-out infinite;
+}
+@keyframes btg-pulse {
+  0%, 100% { box-shadow: 0 0 4px var(--red-glow); }
+  50% { box-shadow: 0 0 16px var(--red-glow); }
+}
+.btg-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg3);
+  border: 1px solid rgba(200,16,46,0.3);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+.btg-form textarea,
+.btg-form input {
+  background: var(--bg);
+}
+
 /* ── Empty state ─────────────────────────────────────────── */
 .empty {
   text-align: center;

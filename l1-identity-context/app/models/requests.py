@@ -68,6 +68,7 @@ class BreakGlassResponse(BaseModel):
     """Response from POST /break-glass."""
     ctx_token: str
     signature: str
+    context_signature: str = Field(..., description="Flat pipe-delimited HMAC for L3+")
     expires_in: int
     emergency_mode: EmergencyMode
     previous_clearance: int

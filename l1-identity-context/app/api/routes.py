@@ -132,7 +132,7 @@ async def resolve_security_context(
     summary="Activate Break-the-Glass emergency access",
     description=(
         "Escalates an existing SecurityContext to maximum clearance (Level 5). "
-        "Extends TTL to 14400 seconds (4 hours). Marks emergency mode. "
+        "Extends TTL to 900 seconds (15 minutes). Marks emergency mode. "
         "Requires a clinical justification (min 20 chars). "
         "Only BTG-eligible roles can activate."
     ),
@@ -194,7 +194,7 @@ async def break_glass(
         raise HTTPException(status_code=e.status_code, detail=e.message)
 
     try:
-        updated_ctx, signature = builder.activate_break_glass(
+        updated_ctx, signature, context_signature = builder.activate_break_glass(
             ctx_id=req.ctx_token,
             reason=req.reason,
             patient_id=req.patient_id,
@@ -212,6 +212,7 @@ async def break_glass(
     return BreakGlassResponse(
         ctx_token=updated_ctx.ctx_id,
         signature=signature,
+        context_signature=context_signature,
         expires_in=updated_ctx.ttl_seconds,
         emergency_mode=EmergencyMode.ACTIVE,
         previous_clearance=original_cl,

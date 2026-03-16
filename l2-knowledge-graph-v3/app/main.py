@@ -16,9 +16,11 @@ import time
 from contextlib import asynccontextmanager
 
 import structlog
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.config import get_settings
 from app.dependencies import Container, set_container
@@ -68,20 +70,21 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if not settings.is_production else None,
     )
 
-    # CORS — restrictive by default
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:3000"] if not settings.is_production else [],
-        allow_methods=["GET", "POST"],
-        allow_headers=["Authorization", "Content-Type"],
-        allow_credentials=False,
-    )
+    # API access audit logging to PostgreSQL
+    app.add_middleware(APIAccessAuditMiddleware)
 
     # Rate limiting per service identity
     app.add_middleware(RateLimitMiddleware)
 
-    # API access audit logging to PostgreSQL
-    app.add_middleware(APIAccessAuditMiddleware)
+    # CORS — added last so it wraps outermost and handles OPTIONS preflight
+    # before rate-limiter / audit middleware can reject it.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"] if not settings.is_production else [],
+        allow_methods=["*"],
+        allow_headers=["*"],
+        allow_credentials=False,
+    )
 
     # ── Request logging middleware ─────────────────────────────
     @app.middleware("http")
@@ -119,6 +122,15 @@ def create_app() -> FastAPI:
     app.include_router(policy_routes.router)
     app.include_router(classification_routes.router)
     app.include_router(admin_routes.router)
+
+    # ── Graph Admin UI ───────────────────────────────────────
+    _graph_admin_path = Path(__file__).resolve().parents[2] / "graph_admin.html"
+
+    @app.get("/graph-admin", include_in_schema=False)
+    async def graph_admin_ui():
+        if _graph_admin_path.exists():
+            return FileResponse(_graph_admin_path, media_type="text/html")
+        return JSONResponse(status_code=404, content={"error": "graph_admin.html not found"})
 
     # ── Health / readiness ────────────────────────────────────
     @app.get("/health", tags=["system"])

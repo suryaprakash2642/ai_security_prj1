@@ -247,11 +247,17 @@ class PolicyOrchestrator:
                     # Column-Level Resolution
                     table_perm.columns = ConflictResolver.resolve_columns(meta, active_policies)
 
-                    # BTG row filter: scope to specific patient if BTG has patient_mrn
-                    if btg_override and btg.patient_mrn:
-                        table_perm.row_filters = [f"(mrn = '{btg.patient_mrn}')"]
+                    # BTG row filter relaxation (spec §10.5):
+                    #   - BTG + patient_mrn → scope to that patient only
+                    #   - BTG + no patient_mrn → broader access (no row filters)
+                    # This applies to ALL BTG-active tables, not just DENY overrides.
+                    if btg_active and btg.patient_mrn:
+                        table_perm.row_filters = [f"(patient_id = '{btg.patient_mrn}')"]
+                    elif btg_active:
+                        # Broader emergency access — no provider/unit/facility scoping
+                        table_perm.row_filters = []
                     else:
-                        # Row-Level & Constraint Aggregation
+                        # Normal (non-BTG) row filter aggregation
                         table_col_names = {cm.column_name for cm in meta.columns.values()} if meta else set()
                         aggregator.aggregate_table_conditions(active_policies, table_perm, table_col_names)
 

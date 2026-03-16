@@ -12,6 +12,8 @@ export function usePipeline(toast) {
   const [jwtRef] = useState({ current: null })
   const [l3CtxRef] = useState({ current: null })
   const [svcTokenRef] = useState({ current: null })
+  const [ctxTokenRef] = useState({ current: null })
+  const [btgState, setBtgState] = useState(null) // { active, expiresAt, previousClearance, elevatedClearance }
   const [layerStates, setLayerStates] = useState({})
   const [pipelineState, setPipelineState] = useState(INITIAL_PIPELINE_STATE)
 
@@ -60,6 +62,7 @@ export function usePipeline(toast) {
       if (!ctxRes.ok) { setLayer('l1', 'error'); toast('L1 identity resolve failed', 'error'); return }
 
       const ctxId = ctxRes.data.context_token_id
+      ctxTokenRef.current = ctxId
       const verifyRes = await apiFetch(`${API.L1}/identity/verify/${ctxId}`)
       const full = verifyRes.ok ? verifyRes.data : {}
 
@@ -81,6 +84,9 @@ export function usePipeline(toast) {
         facility_id:       (full.org_context?.facility_ids || [])[0] || '',
         mfa_verified:      full.identity?.mfa_verified ?? true,
         context_signature: ctxRes.data.context_signature,
+        // Clinical context for row-filter parameter injection ({{user.provider_id}})
+        provider_id:       full.org_context?.employee_id || '',
+        unit_id:           (full.org_context?.unit_ids || [])[0] || '',
       }
 
       if (!l3CtxRef.current.context_signature) {
@@ -107,18 +113,70 @@ export function usePipeline(toast) {
     jwtRef.current = null
     l3CtxRef.current = null
     svcTokenRef.current = null
+    ctxTokenRef.current = null
+    setBtgState(null)
     resetLayers()
     setPipelineState(INITIAL_PIPELINE_STATE)
     toast('Logged out')
   }
 
+  // ── Break-the-Glass ─────────────────────────────────────
+  async function activateBTG(reason, patientId) {
+    if (!auth || !ctxTokenRef.current || !jwtRef.current) {
+      toast('Must be logged in to activate BTG', 'error')
+      return false
+    }
+    const body = { ctx_token: ctxTokenRef.current, reason }
+    if (patientId) body.patient_id = patientId
+
+    const res = await apiFetch(`${API.L1}/identity/emergency`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${jwtRef.current}` },
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+      toast(`BTG failed: ${res.data?.detail || JSON.stringify(res.data)}`, 'error')
+      return false
+    }
+
+    const d = res.data
+    setBtgState({
+      active: true,
+      expiresAt: new Date(Date.now() + d.expires_in * 1000),
+      previousClearance: d.previous_clearance,
+      elevatedClearance: d.elevated_clearance,
+    })
+    setAuth(prev => ({ ...prev, clearance_level: d.elevated_clearance }))
+
+    // Re-fetch the full context from L1 to get the exact expires_at that was signed.
+    // L3 verifies HMAC over (user_id|roles|dept|session|expiry|clearance),
+    // so we must use the exact timestamp L1 used, not a client-side approximation.
+    const verifyRes = await apiFetch(`${API.L1}/identity/verify/${ctxTokenRef.current}`)
+    if (verifyRes.ok && l3CtxRef.current) {
+      const full = verifyRes.data
+      l3CtxRef.current = {
+        ...l3CtxRef.current,
+        context_signature: d.context_signature,
+        clearance_level: full.authorization?.clearance_level ?? d.elevated_clearance,
+        context_expiry: full.expires_at || l3CtxRef.current.context_expiry,
+        break_glass: true,
+        btg_patient_id: full.emergency?.patient_id || patientId || '',
+      }
+    }
+
+    toast(d.message || 'Break-the-Glass activated', 'success')
+    console.log('[BTG] Activated:', d)
+    return true
+  }
+
   // ── Pipeline ─────────────────────────────────────────────
-  async function runPipeline(question, dialect) {
+  async function runPipeline(question) {
     if (!question.trim()) { toast('Enter a question first', 'error'); return }
     if (!auth) { toast('Please login first', 'error'); return }
 
     const reqId = uid()
-    console.log(`\n${'='.repeat(60)}\n[Pipeline] START request=${reqId}\n  question="${question}"\n  dialect=${dialect}\n${'='.repeat(60)}`)
+    console.log(`\n${'='.repeat(60)}\n[Pipeline] START request=${reqId}\n  question="${question}"\n${'='.repeat(60)}`)
 
     setPipelineState({
       ...INITIAL_PIPELINE_STATE, running: true, shown: true,
@@ -200,16 +258,16 @@ export function usePipeline(toast) {
     const filteredSchema = buildFilteredSchema(filteredTables, l3Result)
 
     // Pass database_metadata to L5 so the LLM knows each database's dialect.
-    // Only pass dialect override if user explicitly selected one (not 'auto').
+    // Dialect is NOT pre-selected from L3 — the LLM already has per-table
+    // dialect info in the DDL headers. L5 infers the target DB from the
+    // tables the LLM actually references in the generated SQL.
     const l5Body = {
       user_question: question, filtered_schema: filteredSchema, security_context: l3CtxRef.current,
       permission_envelope: permEnv, request_id: reqId,
       database_metadata: dbMetadata,
-      dialect: dialect === 'auto' ? (l3Result.detected_dialect || 'postgresql') : dialect,
     }
 
     console.log('[L5 Request] Sending to LLM:', {
-      dialect: l5Body.dialect,
       databaseMetadata: dbMetadata,
       tableCount: filteredSchema.tables.length,
       tables: filteredSchema.tables.map(t => `${t.table_id} (${t.columns.length} cols)`),
@@ -235,8 +293,11 @@ export function usePipeline(toast) {
     const l5Status = l5Result.status || ''
 
     // L5 infers the target database and dialect from the tables the LLM used.
-    const detectedDialect = l5Result.dialect || l3Result.detected_dialect || 'postgresql'
+    const detectedDialect = l5Result.dialect || l3Result.detected_dialect || ''
     const detectedDb = l5Result.target_database || l3Result.target_database || ''
+    if (!detectedDialect) {
+      console.warn('[L5 Result] WARNING: No dialect detected from L5 or L3 — check database_metadata')
+    }
     console.log(`[L5 Result] status=${l5Status}, SQL generated (${ms5}ms), dialect=${detectedDialect}, db=${detectedDb}:`, generatedSql)
 
     // Handle L5 non-success statuses (CANNOT_ANSWER, GENERATION_FAILED, etc.)
@@ -385,5 +446,5 @@ export function usePipeline(toast) {
     toast(`Query complete — ${rows.length} rows`, 'success')
   }
 
-  return { auth, layerStates, pipelineState, handleLogin, handleLogout, runPipeline }
+  return { auth, layerStates, pipelineState, btgState, handleLogin, handleLogout, runPipeline, activateBTG }
 }

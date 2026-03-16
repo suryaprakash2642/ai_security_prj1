@@ -6,8 +6,7 @@ DDL strings optimized for LLM context window consumption.
 
 from __future__ import annotations
 
-from app.models.api import FilteredTable, PermissionEnvelope, SQLDialect
-from app.models.enums import SQLDialect as DialectEnum
+from app.models.api import FilteredTable, PermissionEnvelope
 
 
 def _build_column_ddl(col_name: str, data_type: str, description: str,
@@ -30,7 +29,6 @@ def _format_fk_comment(table: FilteredTable) -> str:
 
 
 def generate_fragment(table: FilteredTable, envelope: PermissionEnvelope,
-                      dialect: SQLDialect = DialectEnum.POSTGRESQL,
                       database_metadata: dict[str, str] | None = None) -> str:
     """Generate a DDL fragment for one table as it should appear in the LLM prompt.
 
@@ -105,7 +103,6 @@ def generate_fragment(table: FilteredTable, envelope: PermissionEnvelope,
 
 
 def generate_all_fragments(tables: list[FilteredTable], envelope: PermissionEnvelope,
-                           dialect: SQLDialect = DialectEnum.POSTGRESQL,
                            database_metadata: dict[str, str] | None = None) -> list[tuple[FilteredTable, str]]:
     """Return (table, ddl_string) pairs for all allowed tables, sorted by relevance desc."""
     allowed_ids = envelope.allowed_table_ids
@@ -114,5 +111,5 @@ def generate_all_fragments(tables: list[FilteredTable], envelope: PermissionEnve
         key=lambda t: t.relevance_score,
         reverse=True,
     )
-    return [(t, generate_fragment(t, envelope, dialect, database_metadata=database_metadata))
+    return [(t, generate_fragment(t, envelope, database_metadata=database_metadata))
             for t in sorted_tables]

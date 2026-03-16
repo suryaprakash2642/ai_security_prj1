@@ -218,7 +218,7 @@ class RetrievalResult(BaseModel):
     denied_tables_count: int = 0
 
     # Dialect detection (backend)
-    detected_dialect: str = "postgresql"
+    detected_dialect: str = ""
     target_database: str = ""
 
     # Per-database dialect map for L5 — lets the LLM see the dialect for

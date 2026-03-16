@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from app.models.enums import GenerationStatus, SQLDialect
+from app.models.enums import GenerationStatus
 
 
 # ── Permission Envelope (received from L4 via caller) ──────────────────────
@@ -138,7 +138,6 @@ class GenerationRequest(BaseModel):
     user_question: str = Field(..., min_length=3, max_length=2000)
     permission_envelope: PermissionEnvelope
     filtered_schema: FilteredSchema
-    dialect: SQLDialect = SQLDialect.POSTGRESQL
     security_context: dict[str, Any] = Field(default_factory=dict)
     # Per-database dialect map from L3 — lets the LLM decide which
     # database to target rather than forcing a single dialect upfront.

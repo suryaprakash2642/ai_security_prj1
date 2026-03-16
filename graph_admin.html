@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SentinelSQL - Neo4j Graph Admin</title>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1117;color:#e0e0e0;height:100vh;overflow:hidden}
+.header{background:#161822;border-bottom:1px solid #2a2d3a;padding:8px 16px;display:flex;align-items:center;gap:16px;height:48px}
+.header h1{font-size:16px;color:#7c8aff;white-space:nowrap}
+.header .tabs{display:flex;gap:4px}
+.header .tabs button{background:none;border:1px solid #2a2d3a;color:#999;padding:4px 14px;border-radius:4px;cursor:pointer;font-size:13px}
+.header .tabs button.active{background:#7c8aff;color:#fff;border-color:#7c8aff}
+.main{display:flex;height:calc(100vh - 48px)}
+#graph-container{flex:1;background:#0f1117;position:relative}
+.panel{width:380px;background:#161822;border-left:1px solid #2a2d3a;overflow-y:auto;display:flex;flex-direction:column}
+.panel.hidden{display:none}
+.panel h3{padding:12px;background:#1c1f2e;border-bottom:1px solid #2a2d3a;font-size:14px;position:sticky;top:0;z-index:1}
+.panel .content{padding:12px;flex:1;overflow-y:auto}
+.field{margin-bottom:10px}
+.field label{display:block;font-size:11px;color:#888;margin-bottom:3px;text-transform:uppercase}
+.field input,.field textarea,.field select{width:100%;background:#0f1117;border:1px solid #2a2d3a;color:#e0e0e0;padding:6px 8px;border-radius:4px;font-size:13px;font-family:inherit}
+.field textarea{min-height:80px;resize:vertical}
+.btn{padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-family:inherit}
+.btn-primary{background:#7c8aff;color:#fff}
+.btn-danger{background:#ff4d6a;color:#fff}
+.btn-success{background:#4ecdc4;color:#fff}
+.btn-secondary{background:#2a2d3a;color:#ccc}
+.btn:hover{opacity:0.85}
+.btn-row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.prop-table{width:100%;border-collapse:collapse;margin:8px 0}
+.prop-table td{padding:4px 6px;border-bottom:1px solid #1c1f2e;font-size:12px;vertical-align:top}
+.prop-table td:first-child{color:#7c8aff;width:120px;font-weight:600}
+.prop-table td:last-child{color:#ccc;word-break:break-all}
+.rel-item{padding:6px 8px;margin:3px 0;background:#1c1f2e;border-radius:4px;font-size:12px;display:flex;justify-content:space-between;align-items:center}
+.rel-item .rel-type{color:#f0c674;font-weight:600}
+.rel-item .rel-del{color:#ff4d6a;cursor:pointer;font-size:11px}
+.connect-bar{padding:12px;background:#1c1f2e;border-bottom:1px solid #2a2d3a;display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap}
+.connect-bar .field{margin:0;flex:1;min-width:100px}
+.connect-bar .field label{font-size:10px}
+.connect-bar .field input{padding:4px 6px;font-size:12px}
+.node-color{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.legend{position:absolute;bottom:10px;left:10px;background:rgba(22,24,34,0.9);padding:8px 12px;border-radius:6px;font-size:11px;display:flex;gap:12px;flex-wrap:wrap;z-index:10}
+.legend span{display:flex;align-items:center;gap:4px}
+.matrix-wrap{padding:12px;overflow:auto;flex:1}
+.matrix-table{border-collapse:collapse;font-size:11px;width:100%}
+.matrix-table th,.matrix-table td{padding:4px 6px;border:1px solid #2a2d3a;text-align:center;white-space:nowrap}
+.matrix-table th{background:#1c1f2e;color:#999;font-weight:600;position:sticky;top:0}
+.matrix-table th:first-child{text-align:left}
+.matrix-table td:first-child{text-align:left;font-weight:600;color:#7c8aff;position:sticky;left:0;background:#161822}
+.m-allow{background:#1a4a3a;color:#4ecdc4}
+.m-deny{background:#4a1a2a;color:#ff4d6a}
+.m-filter{background:#4a3a1a;color:#f0c674}
+.m-mask{background:#1a2a4a;color:#7c8aff}
+.m-none{background:#1c1f2e;color:#555}
+.status{position:absolute;top:8px;right:8px;font-size:11px;padding:4px 10px;border-radius:4px;z-index:10}
+.status.ok{background:#1a4a3a;color:#4ecdc4}
+.status.err{background:#4a1a2a;color:#ff4d6a}
+.status.loading{background:#4a3a1a;color:#f0c674}
+.cypher-tab{display:flex;flex-direction:column;height:100%}
+.cypher-tab textarea{flex:1;min-height:200px;font-family:'Cascadia Code',monospace;font-size:12px}
+.cypher-results{flex:1;overflow:auto;padding:8px;font-family:monospace;font-size:11px;background:#0a0c12;white-space:pre-wrap}
+.dialog-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100;display:flex;align-items:center;justify-content:center}
+.dialog{background:#1c1f2e;border:1px solid #2a2d3a;border-radius:8px;padding:20px;min-width:400px;max-width:500px}
+.dialog h3{margin-bottom:12px;color:#7c8aff}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>SentinelSQL Graph Admin</h1>
+  <div class="tabs">
+    <button class="active" onclick="switchTab('graph')">Graph</button>
+    <button onclick="switchTab('matrix')">Policy Matrix</button>
+    <button onclick="switchTab('cypher')">Cypher</button>
+  </div>
+  <div style="flex:1"></div>
+  <div class="btn-row">
+    <button class="btn btn-success" onclick="showDialog('addNode')">+ Node</button>
+    <button class="btn btn-success" onclick="showDialog('addRel')">+ Relationship</button>
+    <button class="btn btn-secondary" onclick="fetchGraph()">Refresh</button>
+  </div>
+</div>
+
+<div class="connect-bar" id="connectBar">
+  <div class="field"><label>L2 Proxy URL (leave blank if served from L2)</label><input id="l2Url" value=""></div>
+  <button class="btn btn-primary" onclick="connect()">Connect</button>
+</div>
+
+<div class="main">
+  <div id="graph-container">
+    <div class="legend">
+      <span><span class="node-color" style="background:#ff4d6a"></span>Policy</span>
+      <span><span class="node-color" style="background:#7c8aff"></span>Role</span>
+      <span><span class="node-color" style="background:#4ecdc4"></span>Table</span>
+      <span><span class="node-color" style="background:#f0c674"></span>Domain</span>
+      <span><span class="node-color" style="background:#999"></span>Column</span>
+      <span><span class="node-color" style="background:#c678dd"></span>Regulation</span>
+      <span><span class="node-color" style="background:#e5c07b"></span>Condition</span>
+    </div>
+    <div class="status hidden" id="statusEl"></div>
+  </div>
+
+  <div id="tab-matrix" class="panel hidden">
+    <h3>Policy Matrix (Role x Table)</h3>
+    <div class="matrix-wrap" id="matrixContent"></div>
+  </div>
+
+  <div id="tab-cypher" class="panel hidden" style="width:100%">
+    <h3>Run Cypher</h3>
+    <div class="cypher-tab content">
+      <div class="field"><label>Query</label>
+        <textarea id="cypherInput" placeholder="MATCH (n) RETURN n LIMIT 25">MATCH (p:Policy) OPTIONAL MATCH (p)-[:APPLIES_TO_ROLE]->(r:Role) RETURN p.policy_id, p.effect, p.priority, collect(r.name) as roles ORDER BY p.priority DESC</textarea>
+      </div>
+      <div class="btn-row"><button class="btn btn-primary" onclick="runCypher()">Execute</button></div>
+      <div class="cypher-results" id="cypherResults">Results will appear here...</div>
+    </div>
+  </div>
+
+  <div class="panel" id="detailPanel">
+    <h3 id="detailTitle">Select a node</h3>
+    <div class="content" id="detailContent">
+      <p style="color:#666;padding:20px;text-align:center">Click on a node in the graph to see its details.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Add Node Dialog -->
+<div class="dialog-overlay hidden" id="dlg-addNode">
+  <div class="dialog">
+    <h3>Add Node</h3>
+    <div class="field"><label>Label</label>
+      <select id="newNodeLabel"><option>Policy</option><option>Role</option><option>Table</option><option>Domain</option><option>Column</option><option>Regulation</option><option>Condition</option></select>
+    </div>
+    <div class="field"><label>Properties (JSON)</label>
+      <textarea id="newNodeProps">{"name": ""}</textarea>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="addNode()">Create</button>
+      <button class="btn btn-secondary" onclick="hideDialogs()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Relationship Dialog -->
+<div class="dialog-overlay hidden" id="dlg-addRel">
+  <div class="dialog">
+    <h3>Add Relationship</h3>
+    <div class="field"><label>From Node ID (Neo4j internal)</label><input id="relFrom" placeholder="Click source node first"></div>
+    <div class="field"><label>To Node ID</label><input id="relTo" placeholder="Then click target node"></div>
+    <div class="field"><label>Relationship Type</label>
+      <select id="relType"><option>APPLIES_TO_ROLE</option><option>GOVERNS_TABLE</option><option>GOVERNS_DOMAIN</option><option>GOVERNS_COLUMN</option><option>HAS_CONDITION</option><option>BELONGS_TO_DOMAIN</option><option>HAS_COLUMN</option><option>INHERITS_FROM</option><option>REGULATED_BY</option><option>ENFORCES_REGULATION</option><option>SUPERSEDES</option></select>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="addRelationship()">Create</button>
+      <button class="btn btn-secondary" onclick="hideDialogs()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const NODE_COLORS = {
+  Policy:'#ff4d6a', Role:'#7c8aff', Table:'#4ecdc4', Domain:'#f0c674',
+  Column:'#999', Regulation:'#c678dd', Condition:'#e5c07b'
+};
+const NODE_SHAPES = {
+  Policy:'diamond', Role:'dot', Table:'box', Domain:'triangle',
+  Column:'square', Regulation:'star', Condition:'hexagon'
+};
+
+let network, nodes, edges, l2ProxyUrl='', graphData={nodes:{},edges:{}}, selectedNodeId=null, addRelMode=null;
+
+function status(msg, type='loading') {
+  const el = document.getElementById('statusEl');
+  el.textContent = msg; el.className = 'status ' + type;
+  el.classList.remove('hidden');
+  if (type !== 'loading') setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+async function neo4jQuery(query, params={}) {
+  const url = `${l2ProxyUrl}/api/v1/admin/cypher-proxy`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({statements: [{statement: query, parameters: params, resultDataContents: ['row','graph']}]})
+  });
+  const data = await resp.json();
+  if (data.errors && data.errors.length > 0) throw new Error(data.errors[0].message);
+  return data;
+}
+
+async function connect() {
+  l2ProxyUrl = document.getElementById('l2Url').value.replace(/\/+$/, '');
+  try {
+    status('Connecting via L2 proxy...');
+    await fetchGraph();
+    document.getElementById('connectBar').classList.add('hidden');
+    status('Connected', 'ok');
+  } catch(e) {
+    status('Connection failed: ' + e.message, 'err');
+  }
+}
+
+async function fetchGraph() {
+  status('Loading graph...');
+  const data = await neo4jQuery('MATCH (n) OPTIONAL MATCH (n)-[r]->(m) RETURN n, r, m');
+  buildGraph(data);
+  status('Graph loaded', 'ok');
+}
+
+function getLabel(n) {
+  return (n.labels || [])[0] || 'Unknown';
+}
+function getDisplayName(n) {
+  const p = n.properties || {};
+  return p.policy_id || p.name || p.table_id || p.condition_id || p.id || ('id:' + n.id);
+}
+
+function buildGraph(data) {
+  const nodesMap = {}, edgesMap = {};
+  for (const result of data.results) {
+    for (const d of (result.data || [])) {
+      for (const g of (d.graph || {}).nodes || []) {
+        if (!nodesMap[g.id]) {
+          const label = getLabel(g);
+          nodesMap[g.id] = {
+            id: g.id, label: getDisplayName(g),
+            color: NODE_COLORS[label] || '#666',
+            shape: NODE_SHAPES[label] || 'dot',
+            font: {color:'#e0e0e0', size:11},
+            _neo4j: g
+          };
+        }
+      }
+      for (const r of (d.graph || {}).relationships || []) {
+        const eid = r.id;
+        if (!edgesMap[eid]) {
+          edgesMap[eid] = {
+            id: eid, from: r.startNode, to: r.endNode,
+            label: r.type, font:{color:'#666',size:9,strokeWidth:0},
+            color:{color:'#444',highlight:'#7c8aff'},
+            arrows:'to', _neo4j: r
+          };
+        }
+      }
+    }
+  }
+  graphData = {nodes: nodesMap, edges: edgesMap};
+  nodes = new vis.DataSet(Object.values(nodesMap));
+  edges = new vis.DataSet(Object.values(edgesMap));
+  const container = document.getElementById('graph-container');
+  network = new vis.Network(container, {nodes, edges}, {
+    physics: {solver:'forceAtlas2Based', forceAtlas2Based:{gravitationalConstant:-80,springLength:120}},
+    interaction: {hover:true, multiselect:false},
+    edges: {smooth:{type:'continuous'}}
+  });
+  network.on('click', (p) => { if(p.nodes.length) selectNode(p.nodes[0]); });
+  network.on('oncontext', (p) => {
+    p.event.preventDefault();
+    if (p.nodes.length) showContextMenu(p.nodes[0], p.event);
+    else if (p.edges.length) showEdgeContextMenu(p.edges[0], p.event);
+  });
+}
+
+function selectNode(nodeId) {
+  selectedNodeId = nodeId;
+  const nd = graphData.nodes[nodeId];
+  if (!nd) return;
+  const neo = nd._neo4j;
+  const label = getLabel(neo);
+  const props = neo.properties || {};
+
+  // If in addRel mode
+  if (addRelMode === 'from') {
+    document.getElementById('relFrom').value = nodeId;
+    addRelMode = 'to';
+    status('Now click target node', 'loading');
+    return;
+  } else if (addRelMode === 'to') {
+    document.getElementById('relTo').value = nodeId;
+    addRelMode = null;
+    return;
+  }
+
+  const title = document.getElementById('detailTitle');
+  title.innerHTML = `<span class="node-color" style="background:${NODE_COLORS[label]||'#666'}"></span> ${label}: ${getDisplayName(neo)}`;
+
+  // Properties
+  let html = '<h4 style="color:#888;margin:8px 0 4px;font-size:11px">PROPERTIES</h4><table class="prop-table">';
+  html += `<tr><td>neo4j_id</td><td>${neo.id}</td></tr>`;
+  html += `<tr><td>labels</td><td>${(neo.labels||[]).join(', ')}</td></tr>`;
+  for (const [k,v] of Object.entries(props)) {
+    const val = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    const shortVal = val.length > 200 ? val.slice(0,200) + '...' : val;
+    html += `<tr><td>${k}</td><td>${shortVal}</td></tr>`;
+  }
+  html += '</table>';
+
+  // Edit properties
+  html += '<h4 style="color:#888;margin:12px 0 4px;font-size:11px">EDIT PROPERTY</h4>';
+  html += '<div class="field"><label>Key</label><input id="editKey" value=""></div>';
+  html += '<div class="field"><label>Value</label><input id="editVal" value=""></div>';
+  html += '<div class="btn-row"><button class="btn btn-primary" onclick="updateProperty()">Set Property</button></div>';
+
+  // Relationships
+  html += '<h4 style="color:#888;margin:12px 0 4px;font-size:11px">RELATIONSHIPS</h4>';
+  const allEdges = Object.values(graphData.edges);
+  const outgoing = allEdges.filter(e => String(e.from) === String(nodeId));
+  const incoming = allEdges.filter(e => String(e.to) === String(nodeId));
+
+  if (outgoing.length) {
+    html += '<div style="color:#4ecdc4;font-size:11px;margin:4px 0">Outgoing:</div>';
+    for (const e of outgoing) {
+      const target = graphData.nodes[e.to];
+      const tname = target ? target.label : e.to;
+      html += `<div class="rel-item"><span><span class="rel-type">${e.label}</span> -> ${tname}</span><span class="rel-del" onclick="deleteEdge('${e.id}')">[x]</span></div>`;
+    }
+  }
+  if (incoming.length) {
+    html += '<div style="color:#f0c674;font-size:11px;margin:4px 0">Incoming:</div>';
+    for (const e of incoming) {
+      const source = graphData.nodes[e.from];
+      const sname = source ? source.label : e.from;
+      html += `<div class="rel-item"><span>${sname} <span class="rel-type">${e.label}</span> -></span><span class="rel-del" onclick="deleteEdge('${e.id}')">[x]</span></div>`;
+    }
+  }
+  if (!outgoing.length && !incoming.length) html += '<p style="color:#555;font-size:12px">No relationships</p>';
+
+  // Delete node
+  html += '<div class="btn-row" style="margin-top:16px"><button class="btn btn-danger" onclick="deleteNode()">Delete Node</button></div>';
+
+  document.getElementById('detailContent').innerHTML = html;
+}
+
+async function updateProperty() {
+  if (!selectedNodeId) return;
+  const key = document.getElementById('editKey').value.trim();
+  const val = document.getElementById('editVal').value;
+  if (!key) return;
+  try {
+    status('Updating...');
+    // Try parsing as number/bool
+    let cyVal = `"${val.replace(/"/g, '\\"')}"`;
+    if (val === 'true' || val === 'false') cyVal = val;
+    else if (!isNaN(val) && val.trim() !== '') cyVal = val;
+    await neo4jQuery(`MATCH (n) WHERE id(n) = $nid SET n.${key} = ${cyVal}`, {nid: parseInt(selectedNodeId)});
+    await fetchGraph();
+    selectNode(selectedNodeId);
+    status('Updated', 'ok');
+  } catch(e) { status(e.message, 'err'); }
+}
+
+async function deleteNode() {
+  if (!selectedNodeId || !confirm('Delete this node and all its relationships?')) return;
+  try {
+    status('Deleting...');
+    await neo4jQuery('MATCH (n) WHERE id(n) = $nid DETACH DELETE n', {nid: parseInt(selectedNodeId)});
+    selectedNodeId = null;
+    document.getElementById('detailContent').innerHTML = '<p style="color:#666;padding:20px;text-align:center">Node deleted.</p>';
+    await fetchGraph();
+    status('Deleted', 'ok');
+  } catch(e) { status(e.message, 'err'); }
+}
+
+async function deleteEdge(edgeId) {
+  if (!confirm('Delete this relationship?')) return;
+  try {
+    status('Deleting...');
+    await neo4jQuery('MATCH ()-[r]->() WHERE id(r) = $rid DELETE r', {rid: parseInt(edgeId)});
+    await fetchGraph();
+    if (selectedNodeId) selectNode(selectedNodeId);
+    status('Relationship deleted', 'ok');
+  } catch(e) { status(e.message, 'err'); }
+}
+
+async function addNode() {
+  const label = document.getElementById('newNodeLabel').value;
+  let props;
+  try { props = JSON.parse(document.getElementById('newNodeProps').value); } catch(e) { status('Invalid JSON', 'err'); return; }
+  const setClause = Object.entries(props).map(([k,v]) => `n.${k} = ${JSON.stringify(v)}`).join(', ');
+  try {
+    status('Creating...');
+    await neo4jQuery(`CREATE (n:${label}) SET ${setClause}`);
+    hideDialogs();
+    await fetchGraph();
+    status('Node created', 'ok');
+  } catch(e) { status(e.message, 'err'); }
+}
+
+async function addRelationship() {
+  const from = document.getElementById('relFrom').value;
+  const to = document.getElementById('relTo').value;
+  const type = document.getElementById('relType').value;
+  if (!from || !to) { status('Select both nodes', 'err'); return; }
+  try {
+    status('Creating...');
+    await neo4jQuery(`MATCH (a), (b) WHERE id(a) = $fid AND id(b) = $tid CREATE (a)-[:${type}]->(b)`, {fid:parseInt(from), tid:parseInt(to)});
+    hideDialogs();
+    await fetchGraph();
+    status('Relationship created', 'ok');
+  } catch(e) { status(e.message, 'err'); }
+}
+
+async function runCypher() {
+  const q = document.getElementById('cypherInput').value.trim();
+  if (!q) return;
+  const el = document.getElementById('cypherResults');
+  try {
+    status('Running...');
+    const data = await neo4jQuery(q);
+    let out = '';
+    for (const result of data.results) {
+      const cols = result.columns || [];
+      out += cols.join(' | ') + '\n' + '-'.repeat(80) + '\n';
+      for (const d of (result.data || [])) {
+        out += (d.row || []).map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join(' | ') + '\n';
+      }
+    }
+    el.textContent = out || 'Query executed (no results)';
+    // If graph data returned, refresh
+    if (data.results?.[0]?.data?.[0]?.graph) { buildGraph(data); }
+    status('Done', 'ok');
+  } catch(e) {
+    el.textContent = 'ERROR: ' + e.message;
+    status(e.message, 'err');
+  }
+}
+
+async function loadMatrix() {
+  const el = document.getElementById('matrixContent');
+  el.innerHTML = '<p style="color:#666">Loading...</p>';
+  try {
+    const data = await neo4jQuery(`
+      MATCH (r:Role)
+      OPTIONAL MATCH (p:Policy)-[:APPLIES_TO_ROLE]->(r)
+      WHERE p.effect IN ['ALLOW','DENY','FILTER','MASK']
+      OPTIONAL MATCH (p)-[:GOVERNS_TABLE]->(t:Table)
+      WITH r.name AS role, p.policy_id AS pid, p.effect AS effect, collect(DISTINCT t.table_id) AS tables
+      RETURN role, pid, effect, tables
+      ORDER BY role, effect
+    `);
+    // Build matrix
+    const roles = new Set(), tableSet = new Set(), cells = {};
+    for (const result of data.results) {
+      for (const d of (result.data||[])) {
+        const [role, pid, effect, tables] = d.row;
+        if (!role) continue;
+        roles.add(role);
+        for (const t of (tables||[])) {
+          const short = t.split('.').pop();
+          tableSet.add(short);
+          const key = role + '|' + short;
+          if (!cells[key] || priorityOf(effect) > priorityOf(cells[key].effect)) {
+            cells[key] = {effect, pid};
+          }
+        }
+      }
+    }
+    const tableArr = [...tableSet].sort();
+    const roleArr = [...roles].sort();
+    let html = '<table class="matrix-table"><tr><th>Role \\ Table</th>';
+    for (const t of tableArr) html += `<th>${t}</th>`;
+    html += '</tr>';
+    for (const r of roleArr) {
+      html += `<tr><td>${r}</td>`;
+      for (const t of tableArr) {
+        const c = cells[r + '|' + t];
+        if (c) {
+          const cls = 'm-' + c.effect.toLowerCase();
+          html += `<td class="${cls}" title="${c.pid}">${c.effect}<br><small>${c.pid}</small></td>`;
+        } else {
+          html += '<td class="m-none">-</td>';
+        }
+      }
+      html += '</tr>';
+    }
+    html += '</table>';
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<p style="color:#ff4d6a">Error: ' + e.message + '</p>'; }
+}
+
+function priorityOf(effect) {
+  return {DENY:4,FILTER:3,MASK:2,ALLOW:1}[effect] || 0;
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('graph-container').style.display = tab === 'graph' ? '' : 'none';
+  document.getElementById('tab-matrix').classList.toggle('hidden', tab !== 'matrix');
+  document.getElementById('tab-cypher').classList.toggle('hidden', tab !== 'cypher');
+  document.getElementById('detailPanel').classList.toggle('hidden', tab !== 'graph');
+  if (tab === 'matrix') loadMatrix();
+}
+
+function showDialog(id) {
+  document.getElementById('dlg-' + id).classList.remove('hidden');
+  if (id === 'addRel') { addRelMode = 'from'; status('Click source node', 'loading'); }
+}
+function hideDialogs() {
+  document.querySelectorAll('.dialog-overlay').forEach(d => d.classList.add('hidden'));
+  addRelMode = null;
+}
+
+function showContextMenu(nodeId, evt) {
+  selectNode(nodeId);
+}
+function showEdgeContextMenu(edgeId, evt) {
+  if (confirm('Delete this relationship?')) deleteEdge(edgeId);
+}
+
+document.addEventListener('keydown', e => { if(e.key==='Escape') hideDialogs(); });
+</script>
+</body>
+</html>

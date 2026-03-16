@@ -96,22 +96,27 @@ def _build_database_context(database_metadata: dict[str, str]) -> str:
     target database without requiring the caller to pre-select a dialect.
     """
     if not database_metadata:
-        return "DATABASE CONTEXT:\nGenerate standard PostgreSQL SQL."
+        raise ValueError(
+            "Cannot build database context: no database_metadata provided. "
+            "Ensure L3 returns database_metadata in the retrieval response."
+        )
 
     lines = ["DATABASE CONTEXT:", "The schema below includes tables from these databases:"]
     for db_name, dialect in sorted(database_metadata.items()):
-        dialect_label = _DIALECT_NAMES.get(
-            _DIALECT_STR_TO_ENUM.get(dialect, SQLDialect.POSTGRESQL),
-            dialect.upper(),
-        )
+        dialect_enum = _DIALECT_STR_TO_ENUM.get(dialect)
+        if dialect_enum is None:
+            raise ValueError(
+                f"Unknown SQL dialect '{dialect}' for database '{db_name}'. "
+                f"Known dialects: {list(_DIALECT_STR_TO_ENUM.keys())}. "
+                f"Ensure the Database node in Neo4j has a valid engine property."
+            )
+        dialect_label = _DIALECT_NAMES.get(dialect_enum, dialect.upper())
         lines.append(f"  - {db_name} ({dialect_label})")
 
     if len(database_metadata) == 1:
         single_dialect = next(iter(database_metadata.values()))
-        dialect_label = _DIALECT_NAMES.get(
-            _DIALECT_STR_TO_ENUM.get(single_dialect, SQLDialect.POSTGRESQL),
-            single_dialect.upper(),
-        )
+        dialect_enum = _DIALECT_STR_TO_ENUM[single_dialect]  # already validated above
+        dialect_label = _DIALECT_NAMES.get(dialect_enum, single_dialect.upper())
         lines.append(f"Generate {dialect_label} SQL.")
     else:
         lines.append(
@@ -187,7 +192,6 @@ def assemble_prompt(
     sanitized_question: str,
     envelope: PermissionEnvelope,
     schema: FilteredSchema,
-    dialect: SQLDialect = SQLDialect.POSTGRESQL,
     max_prompt_tokens: int = 10000,
     response_reserve_tokens: int = 2048,
     default_max_rows: int = 1000,
@@ -198,10 +202,8 @@ def assemble_prompt(
     Policy rules and the user question are NEVER truncated.
     Schema is truncated (lowest-relevance first) if the token budget is tight.
 
-    When ``database_metadata`` is provided the system prompt includes a
-    DATABASE CONTEXT section listing each database and its SQL dialect so
-    the LLM can generate syntactically correct SQL without requiring the
-    caller to pre-select a single dialect.
+    ``database_metadata`` provides a {db_name: dialect} map so the LLM
+    can generate syntactically correct SQL for the target database.
     """
     # ── 1. System prompt ──────────────────────────────────────────────────
     max_rows = default_max_rows
@@ -230,7 +232,7 @@ def assemble_prompt(
         rules_section = ""
 
     # ── 3. Schema fragments ────────────────────────────────────────────────
-    table_ddls = generate_all_fragments(schema.tables, envelope, dialect,
+    table_ddls = generate_all_fragments(schema.tables, envelope,
                                         database_metadata=database_metadata)
 
     # Budget calculation
@@ -274,15 +276,19 @@ def assemble_prompt(
 
     # ── 4. Question section ────────────────────────────────────────────────
     # Build dialect-aware footer. When database_metadata is available, derive
-    # the hint from the databases in the schema rather than the pre-selected
-    # dialect parameter.
+    # Derive dialect hint from database_metadata — the LLM needs to know
+    # which SQL dialect to generate for the target database(s).
     if database_metadata:
         dialects_in_use = set(database_metadata.values())
         if len(dialects_in_use) == 1:
             d = next(iter(dialects_in_use))
-            dialect_label = _DIALECT_NAMES.get(
-                _DIALECT_STR_TO_ENUM.get(d, SQLDialect.POSTGRESQL), d.upper(),
-            )
+            dialect_enum = _DIALECT_STR_TO_ENUM.get(d)
+            if dialect_enum is None:
+                raise ValueError(
+                    f"Unknown SQL dialect '{d}' in database_metadata. "
+                    f"Known dialects: {list(_DIALECT_STR_TO_ENUM.keys())}."
+                )
+            dialect_label = _DIALECT_NAMES.get(dialect_enum, d.upper())
             footer = f"Generate a single valid {dialect_label} SELECT query using ONLY the tables and columns above."
             hint = _DIALECT_HINTS.get(d, "")
             if hint:
@@ -293,11 +299,10 @@ def assemble_prompt(
                 "Use the correct SQL dialect for the database whose tables you reference."
             )
     else:
-        dialect_name = _DIALECT_NAMES.get(dialect, "PostgreSQL")
-        dialect_extra = _DIALECT_HINTS.get(dialect.value if hasattr(dialect, "value") else str(dialect), "")
-        footer = f"Generate a single valid {dialect_name} SELECT query using ONLY the tables and columns above."
-        if dialect_extra:
-            footer += f" {dialect_extra}"
+        raise ValueError(
+            "Cannot assemble prompt: no database_metadata provided. "
+            "Ensure L3 returns database_metadata in the retrieval response."
+        )
 
     question_section = (
         f"=== USER QUESTION ===\n{sanitized_question}\n=== END USER QUESTION ===\n\n"

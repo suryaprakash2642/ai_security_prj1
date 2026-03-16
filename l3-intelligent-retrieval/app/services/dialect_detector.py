@@ -72,7 +72,11 @@ class DialectDetector:
         for db in databases:
             # Prefer engine from description — the engine field can be stale
             desc_engine = _engine_from_description(db.description)
-            engine = desc_engine or (db.engine or "postgresql").lower()
+            engine = desc_engine or (db.engine or "").lower()
+            if not engine:
+                logger.warning("no_engine_for_database", database=db.name,
+                               hint="Set engine property on Database node in Neo4j")
+                continue
             dialect = _ENGINE_TO_DIALECT.get(engine, engine)
             self._db_to_dialect[db.name.lower()] = dialect
         logger.info(
@@ -81,8 +85,18 @@ class DialectDetector:
         )
 
     def dialect_for_db(self, db_name: str) -> str:
-        """Look up dialect for a database name."""
-        return self._db_to_dialect.get(db_name.lower(), "postgresql")
+        """Look up dialect for a database name.
+
+        Raises ValueError if the database is not in the catalog.
+        """
+        key = db_name.lower()
+        if key not in self._db_to_dialect:
+            raise ValueError(
+                f"Unknown database '{db_name}' — no dialect mapping found. "
+                f"Known databases: {list(self._db_to_dialect.keys())}. "
+                f"Ensure the Database node in Neo4j has a valid engine property."
+            )
+        return self._db_to_dialect[key]
 
     def get_database_metadata(
         self, tables: list[FilteredTable],
@@ -146,4 +160,7 @@ class DialectDetector:
             )
             return dialect, db
 
-        return "postgresql", ""
+        raise ValueError(
+            "Cannot detect SQL dialect — no tables available in the filtered schema. "
+            "Ensure the query matches at least one table in the knowledge graph."
+        )

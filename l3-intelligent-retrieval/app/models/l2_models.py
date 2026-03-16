@@ -85,7 +85,7 @@ class L2DatabaseInfo(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     name: str
-    engine: str = "postgresql"
+    engine: str = ""
     description: str = ""
     host: str = ""
     port: int = 0

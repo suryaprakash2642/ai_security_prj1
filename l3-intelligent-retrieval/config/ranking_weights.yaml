@@ -10,8 +10,8 @@ scoring:
 
 retrieval:
   max_tables: 10
-  semantic_top_k: 15
-  semantic_min_threshold: 0.35
+  semantic_top_k: 25
+  semantic_min_threshold: 0.30
   keyword_exact_table_boost: 0.95
   keyword_exact_column_boost: 0.80
   keyword_domain_boost: 0.60

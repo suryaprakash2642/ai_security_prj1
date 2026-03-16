@@ -28,9 +28,9 @@ async def generate_sql(
     """
     logger.info("Generation request received",
                 request_id=request.request_id,
-                dialect=request.dialect,
                 question_len=len(request.user_question),
-                tables=len(request.filtered_schema.tables))
+                tables=len(request.filtered_schema.tables),
+                database_metadata=request.database_metadata)
 
     response = await run(request, settings)
     return response

@@ -7,7 +7,8 @@ Edge Cases Implemented (Section 15):
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.auth import ServiceIdentity, require_permission
@@ -249,6 +250,127 @@ async def rollback_policy(
 
 
 # ── Role Hierarchy (EC-5) ─────────────────────────────────────
+
+
+# ── Dev-only Cypher Proxy (graph_admin.html) ──────────────────
+
+
+@router.post("/cypher-proxy")
+async def cypher_proxy(request: Request):
+    """Dev-only: proxy Cypher queries via the Neo4j Bolt driver so
+    graph_admin.html can work without direct Neo4j HTTP API access.
+
+    Returns data in the same shape as the Neo4j HTTP tx/commit endpoint
+    (results[].columns, results[].data[].row, results[].data[].graph)
+    so the existing graph_admin.html JS works unchanged.
+    """
+    from neo4j.graph import Node, Relationship
+    from neo4j.time import DateTime, Date, Time, Duration
+
+    def _serialize(val):
+        """Convert neo4j temporal types to JSON-safe strings."""
+        if isinstance(val, (DateTime, Date, Time)):
+            return val.iso_format()
+        if isinstance(val, Duration):
+            return str(val)
+        if isinstance(val, dict):
+            return {k: _serialize(v) for k, v in val.items()}
+        if isinstance(val, list):
+            return [_serialize(v) for v in val]
+        return val
+
+    container = get_container()
+    body = await request.json()
+
+    statements = body.get("statements", [])
+    if not statements:
+        return JSONResponse(content={"results": [], "errors": []})
+
+    stmt = statements[0]
+    query = stmt.get("statement", "")
+    params = stmt.get("parameters", {})
+
+    try:
+        is_read = query.strip().upper().startswith(("MATCH", "RETURN", "CALL", "EXPLAIN", "PROFILE", "UNWIND", "WITH", "OPTIONAL"))
+        if is_read:
+            driver = container.neo4j._read_driver
+        else:
+            driver = container.neo4j._write_driver
+
+        columns = []
+        rows_data = []
+
+        async with driver.session(database=container.settings.neo4j_database) as session:
+            result = await session.run(query, params)
+            columns = list(result.keys())
+            records = [record async for record in result]
+
+        for record in records:
+            row = []
+            graph_nodes = []
+            graph_rels = []
+
+            for key in columns:
+                val = record[key]
+                if isinstance(val, Node):
+                    props = _serialize(dict(val))
+                    row.append(props)
+                    graph_nodes.append({
+                        "id": str(val.element_id) if hasattr(val, 'element_id') else str(val.id),
+                        "labels": list(val.labels),
+                        "properties": props,
+                    })
+                elif isinstance(val, Relationship):
+                    props = _serialize(dict(val))
+                    row.append(props)
+                    graph_rels.append({
+                        "id": str(val.element_id) if hasattr(val, 'element_id') else str(val.id),
+                        "type": val.type,
+                        "startNode": str(val.start_node.element_id) if hasattr(val.start_node, 'element_id') else str(val.start_node.id),
+                        "endNode": str(val.end_node.element_id) if hasattr(val.end_node, 'element_id') else str(val.end_node.id),
+                        "properties": props,
+                    })
+                elif isinstance(val, list):
+                    converted = []
+                    for item in val:
+                        if isinstance(item, Node):
+                            p = _serialize(dict(item))
+                            converted.append(p)
+                            graph_nodes.append({
+                                "id": str(item.element_id) if hasattr(item, 'element_id') else str(item.id),
+                                "labels": list(item.labels),
+                                "properties": p,
+                            })
+                        elif isinstance(item, Relationship):
+                            p = _serialize(dict(item))
+                            converted.append(p)
+                            graph_rels.append({
+                                "id": str(item.element_id) if hasattr(item, 'element_id') else str(item.id),
+                                "type": item.type,
+                                "startNode": str(item.start_node.element_id) if hasattr(item.start_node, 'element_id') else str(item.start_node.id),
+                                "endNode": str(item.end_node.element_id) if hasattr(item.end_node, 'element_id') else str(item.end_node.id),
+                                "properties": p,
+                            })
+                        else:
+                            converted.append(_serialize(item))
+                    row.append(converted)
+                else:
+                    row.append(_serialize(val))
+
+            entry = {"row": row, "meta": [None] * len(row)}
+            if graph_nodes or graph_rels:
+                entry["graph"] = {"nodes": graph_nodes, "relationships": graph_rels}
+            rows_data.append(entry)
+
+        return JSONResponse(content={
+            "results": [{"columns": columns, "data": rows_data}],
+            "errors": [],
+        })
+    except Exception as exc:
+        return JSONResponse(content={
+            "results": [],
+            "errors": [{"message": str(exc)}],
+        })
 
 
 class AddRoleInheritanceRequest(BaseModel):

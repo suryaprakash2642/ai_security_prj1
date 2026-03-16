@@ -24,7 +24,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: frontend
-          image: jimsonrats/frontend:latest
+          image: jimsonrats/react-frontend:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 80

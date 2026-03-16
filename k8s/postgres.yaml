@@ -71,7 +71,7 @@ metadata:
   name: postgres
   namespace: sentinelsql
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: postgres
   ports:

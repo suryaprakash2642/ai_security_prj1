@@ -65,8 +65,8 @@ class ExecutionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: str = Field(..., min_length=1)
     validated_sql: str = Field(..., min_length=1)
-    dialect: str = "postgresql"
-    target_database: str = "mock"
+    dialect: str = Field(..., description="SQL dialect (e.g. 'postgresql', 'mysql')")
+    target_database: str = Field(..., description="Target database name")
     parameters: dict[str, Any] = {}
     permission_envelope: PermissionEnvelope
     execution_config: ExecutionConfig = ExecutionConfig()

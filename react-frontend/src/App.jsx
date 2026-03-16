@@ -10,7 +10,7 @@ import { useTheme } from './hooks/useTheme.js'
 
 export default function App() {
   const { toast, ToastContainer } = useToast()
-  const { auth, layerStates, pipelineState, handleLogin, handleLogout, runPipeline } = usePipeline(toast)
+  const { auth, layerStates, pipelineState, btgState, handleLogin, handleLogout, runPipeline, activateBTG } = usePipeline(toast)
   const { theme, toggleTheme } = useTheme()
   const [tab, setTab] = useState('query')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -42,6 +42,7 @@ export default function App() {
           {auth
             ? <span className="chip chip-green">✓ {auth.user_id}</span>
             : <span className="chip chip-red">Not Authenticated</span>}
+          {btgState?.active && <span className="chip chip-red">BTG ACTIVE</span>}
           {pipelineState.running && <span className="chip chip-blue"><span className="spinner" /> Running</span>}
           <button className="theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
             {theme === 'dark' ? '☀️' : '🌙'}
@@ -50,7 +51,7 @@ export default function App() {
       </header>
 
       <div className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`} onClick={closeSidebar} />
-      <Sidebar auth={auth} onLogin={handleLogin} onLogout={handleLogout} layerStates={layerStates} className={sidebarOpen ? 'open' : ''} />
+      <Sidebar auth={auth} onLogin={handleLogin} onLogout={handleLogout} btgState={btgState} onActivateBTG={activateBTG} layerStates={layerStates} className={sidebarOpen ? 'open' : ''} />
 
       <main className="main">
         <div className="tabs">

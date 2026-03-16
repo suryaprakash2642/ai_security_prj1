@@ -43,6 +43,7 @@ class SecurityContext(BaseModel):
     # Optional enrichment fields
     purpose: str = Field(default="", description="Stated query purpose")
     break_glass: bool = Field(default=False, description="Emergency access flag")
+    btg_patient_id: str = Field(default="", description="Patient ID scoped by BTG (if any)")
     mfa_verified: bool = Field(default=False)
 
     @field_validator("effective_roles")

@@ -121,7 +121,7 @@ class ValidationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: str = ""
     raw_sql: str = Field(..., min_length=1)
-    dialect: str = "postgresql"
+    dialect: str = Field(..., description="SQL dialect (e.g. 'postgresql', 'mysql')")
     permission_envelope: PermissionEnvelope
     security_context: dict[str, Any] = Field(default_factory=dict)
     generation_metadata: dict[str, Any] = Field(default_factory=dict)

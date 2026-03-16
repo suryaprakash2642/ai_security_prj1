@@ -23,16 +23,7 @@ spec:
     - host: sentinelsql.centralindia.cloudapp.azure.com
       http:
         paths:
-          # API Layer (Front-end FastAPI)
-          - path: /api/
-            pathType: Prefix
-            backend:
-              service:
-                name: front-end
-                port:
-                  number: 8000
-          
-          # Static Frontend (Catch-all)
+          # React Frontend (catch-all)
           - path: /
             pathType: Prefix
             backend:

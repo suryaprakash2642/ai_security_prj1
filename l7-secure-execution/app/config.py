@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=("../.env.local", ".env"), extra="ignore")
 
     app_env: str = "development"
     service_port: int = 8700
@@ -36,23 +36,23 @@ class Settings(BaseSettings):
     mock_execution: bool = False
     mock_execution_latency_ms: int = 50
 
-    # Aiven PostgreSQL
-    postgres_host: str = "pg-hospital-system-hospital-syatem.k.aivencloud.com"
-    postgres_port: int = 21400
-    postgres_user: str = "avnadmin"
-    postgres_password: str = ""
+    # PostgreSQL
+    postgres_host: str = "127.0.0.1"
+    postgres_port: int = 15432
+    postgres_user: str = "sentinelsql"
+    postgres_password: str = "1234"
     postgres_dbname_analytics: str = "apollo_analytics"
     postgres_dbname_financial: str = "apollo_financial"
-    postgres_sslmode: str = "require"
+    postgres_sslmode: str = "disable"
 
-    # Aiven MySQL
-    mysql_host: str = "mysql-hospital-system-hospital-syatem.k.aivencloud.com"
-    mysql_port: int = 21400
-    mysql_user: str = "avnadmin"
-    mysql_password: str = ""
+    # MySQL
+    mysql_host: str = "127.0.0.1"
+    mysql_port: int = 13306
+    mysql_user: str = "sentinelsql"
+    mysql_password: str = "1234"
     mysql_dbname_his: str = "ApolloHIS"
     mysql_dbname_hr: str = "ApolloHR"
-    mysql_ssl: bool = True
+    mysql_ssl: bool = False
 
     # Optional NL summary
     nl_summary_enabled: bool = False

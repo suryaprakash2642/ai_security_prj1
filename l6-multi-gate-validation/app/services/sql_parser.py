@@ -45,7 +45,7 @@ class ParsedSQL:
     has_write_ops: bool = False
     statement_count: int = 1
     parse_error: str | None = None
-    dialect: str = "postgresql"
+    dialect: str = ""
 
 
 def _count_subquery_depth(node: exp.Expression) -> int:
@@ -82,7 +82,7 @@ def _extract_table_name(table_node: exp.Table) -> str:
     return ".".join(parts).lower()
 
 
-def parse_sql(sql: str, dialect: str = "postgresql") -> ParsedSQL:
+def parse_sql(sql: str, dialect: str) -> ParsedSQL:
     """Parse SQL string into a structured ParsedSQL object."""
     sg_dialect = _DIALECT_MAP.get(dialect.lower(), "postgres")
     result = ParsedSQL(ast=None, dialect=dialect)

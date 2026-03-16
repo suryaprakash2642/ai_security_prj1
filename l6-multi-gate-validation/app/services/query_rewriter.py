@@ -86,7 +86,7 @@ def rewrite(
     sql: str,
     parsed: ParsedSQL,
     envelope: PermissionEnvelope,
-    dialect: str = "postgresql",
+    dialect: str,
     gate2_violations: list[Violation] | None = None,
     gate1_violations: list[Violation] | None = None,
     default_max_rows: int = 1000,

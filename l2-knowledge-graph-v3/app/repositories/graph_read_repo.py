@@ -78,7 +78,7 @@ class GraphReadRepository:
         return [
             {
                 "name": r["name"],
-                "engine": r["engine"] or "postgresql",
+                "engine": r["engine"] or "",
                 "description": r.get("description", ""),
                 "host": r.get("host", ""),
                 "port": r.get("port", 0),

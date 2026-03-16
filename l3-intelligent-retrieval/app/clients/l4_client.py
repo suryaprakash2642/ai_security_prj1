@@ -14,6 +14,7 @@ import structlog
 from app.auth import create_service_token
 from app.config import Settings
 from app.models.l4_models import (
+    BTGToken,
     PermissionEnvelope,
     PolicyResolveRequest,
 )
@@ -52,6 +53,7 @@ class L4Client:
         effective_roles: list[str],
         user_context: dict[str, Any],
         request_id: str = "",
+        btg_token: BTGToken | None = None,
     ) -> PermissionEnvelope:
         """Call L4 to resolve policies for candidate tables.
 
@@ -66,6 +68,7 @@ class L4Client:
             effective_roles=effective_roles,
             user_context=user_context,
             request_id=request_id,
+            btg_token=btg_token,
         )
 
         try:

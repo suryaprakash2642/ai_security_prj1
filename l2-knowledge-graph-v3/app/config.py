@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     # Rate limiting
     rate_limit_per_minute: int = 600
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {"env_file": ("../.env.local", ".env"), "env_file_encoding": "utf-8", "extra": "ignore"}
 
     @field_validator("service_token_secret")
     @classmethod

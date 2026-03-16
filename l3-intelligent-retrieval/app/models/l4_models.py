@@ -13,6 +13,23 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.enums import ColumnVisibility, TableDecision
 
 
+class BTGToken(BaseModel):
+    """Break-the-Glass emergency access token passed to L4."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    token_id: str
+    user_id: str
+    patient_mrn: str | None = None
+    reason: str = ""
+    emergency_level: str = "CLINICAL_EMERGENCY"
+    granted_at: str = ""
+    expires_at: str = ""
+    granted_by: str = ""
+    still_denied: list[str] = Field(default_factory=list)
+    signature: str = ""
+
+
 class PolicyResolveRequest(BaseModel):
     """Request to L4 to resolve policies for candidate tables."""
 
@@ -22,6 +39,7 @@ class PolicyResolveRequest(BaseModel):
     effective_roles: list[str]
     user_context: dict[str, Any] = Field(default_factory=dict)
     request_id: str = ""
+    btg_token: BTGToken | None = Field(default=None, description="Active BTG token")
 
 
 class ColumnDecision(BaseModel):

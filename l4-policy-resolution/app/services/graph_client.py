@@ -23,16 +23,18 @@ class GraphClient:
 
     async def get_effective_roles(self, initial_roles: list[str]) -> set[str]:
         """Traverse role hierarchy and return all roles the user inherits exactly."""
+        # Normalize to lowercase — L1 sends UPPERCASE roles but Neo4j stores lowercase
+        normalized = [r.lower() for r in initial_roles]
         query = """
         UNWIND $roles AS role_name
         MATCH (start:Role {name: role_name})-[:INHERITS_FROM*0..]->(inherited:Role)
         RETURN collect(DISTINCT inherited.name) AS effective_roles
         """
         async with self._driver.session() as session:
-            result = await session.run(query, roles=initial_roles)
+            result = await session.run(query, roles=normalized)
             record = await result.single()
             if not record:
-                return set(initial_roles)
+                return set(normalized)
             return set(record["effective_roles"])
 
     async def get_table_policies(self, table_ids: list[str], roles: list[str]) -> list[dict]:

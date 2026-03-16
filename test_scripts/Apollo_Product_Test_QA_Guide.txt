@@ -1,0 +1,858 @@
+﻿Apollo Hospitals
+Zero Trust NL-to-SQL Pipeline
+Product Test Guide — Questions, Expected Answers & SQL Queries
+Based on: apollo_analysis.html Relationship Diagram + Pipeline Documentation v1.0
+Database: apollo_analytics (PostgreSQL 15)  ·  5 Users  ·  50 Test Cases
+
+
+Test Coverage Summary
+User
+	Role
+	Policies
+	Clr
+	Domain
+	Queries
+	Dr. Rajesh Patel
+	Attending Physician
+	CLIN-001, HIPAA-001
+	4
+	Clinical
+	10
+	Anita Kumar
+	Registered Nurse
+	CLIN-002, HIPAA-001
+	2
+	Clinical
+	10
+	Maria Fernandes
+	Billing Clerk
+	BIZ-001, HIPAA-001, SEC-002
+	2
+	Business
+	10
+	Vikram Joshi
+	IT Administrator
+	HIPAA-001 only
+	2
+	IT
+	10
+	Priya Mehta
+	HR Manager
+	HR-001, HIPAA-001, SEC-001, SEC-003
+	3
+	HR
+	10
+	
+
+Relationship Diagram — Cross-Domain Policy Gates
+Policy
+	Domain A
+	Domain B
+	Effect & Reason
+	SEC-001
+	HIS Clinical
+	HR (ApolloHR)
+	BLOCKED — patients JOIN employees DENIED. Prevents patient-outcome/staff-data correlation.
+	SEC-002
+	HIS Clinical
+	Financial (Oracle)
+	RESTRICTED — Billing_Clerk / Revenue_Cycle_Analyst only. Join via patient_id or encounter_id only.
+	SEC-003
+	HR (ApolloHR)
+	Financial (Oracle)
+	BLOCKED — payroll JOIN claims DENIED. Salary data must never be correlated with billing data.
+	PSYCH-001
+	clinical_notes
+	note_type=Psychiatry
+	ABSOLUTE DENY — BTG cannot override. Only Psychiatrist role. 42 CFR Part 2 + HIPAA.
+	
+
+________________
+
+
+Dr. Rajesh Patel
+Attending Physician — Cardiology, FAC-001 (APJH, Hyderabad)  ·  OID: oid-dr-patel-4521  ·  EmpID: DR-0001
+
+
+Applied Policies: CLIN-001, HIPAA-001 | Clearance 4 | max_rows=1000 | Domain: Clinical
+Q01  How many total inpatient encounters were recorded for Cardiology at FAC-001 this year?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns SUM(total_encounters) for INPATIENT encounters filtered to FAC-001 + Cardiology for current year. Expected: ~1,200–1,500 encounters.
+SELECT
+    SUM(total_encounters)   AS total_inpatient_encounters,
+    SUM(total_admissions)   AS total_admissions,
+    SUM(total_discharges)   AS total_discharges
+FROM encounter_summaries
+WHERE facility_id    = 'FAC-001'
+  AND department_name = 'Cardiology'
+  AND encounter_type  = 'INPATIENT'
+  AND report_month   >= DATE_TRUNC('year', CURRENT_DATE)
+LIMIT 1000;
+Policy Gate: CLIN-001: FAC-001 row filter + Cardiology dept. Aggregate only — no PHI. HIPAA-001 max_rows=1000.
+
+
+Q02  What is the average length of stay for cardiac patients across all Apollo facilities?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns avg_length_of_stay grouped by facility for Cardiology INPATIENT. Expect 3–9 days across 8 facilities.
+SELECT
+    facility_id, facility_name,
+    ROUND(AVG(avg_length_of_stay),1) AS avg_los_days,
+    SUM(total_encounters)            AS total_encounters
+FROM encounter_summaries
+WHERE department_name = 'Cardiology'
+  AND encounter_type   = 'INPATIENT'
+GROUP BY facility_id, facility_name
+ORDER BY avg_los_days DESC
+LIMIT 1000;
+Policy Gate: CLIN-001: Cross-facility aggregate on analytics summaries — no patient-level data.
+
+
+Q03  Which departments at FAC-001 had a readmission rate above 5% last quarter?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns department names with AVG(readmission_rate) > 5.0 for FAC-001 last quarter. Cardiology, Nephrology, Pulmonology typically appear.
+SELECT
+    department_name,
+    ROUND(AVG(readmission_rate),2) AS avg_readmission_pct,
+    SUM(readmission_count)         AS total_readmissions,
+    SUM(total_encounters)          AS total_encounters
+FROM encounter_summaries
+WHERE facility_id  = 'FAC-001'
+  AND report_month >= DATE_TRUNC('quarter', CURRENT_DATE - INTERVAL '3 months')
+  AND report_month <  DATE_TRUNC('quarter', CURRENT_DATE)
+GROUP BY department_name
+HAVING AVG(readmission_rate) > 5.0
+ORDER BY avg_readmission_pct DESC
+LIMIT 1000;
+Policy Gate: CLIN-001: HAVING on aggregate — Minimum Necessary met. No row-level patient data.
+
+
+Q04  Show the mortality rate trend for FAC-001 over the past 6 months
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns month-by-month mortality_rate + mortality_count for FAC-001 across all departments over last 6 months.
+SELECT
+    report_month, department_name, encounter_type,
+    mortality_count, mortality_rate
+FROM encounter_summaries
+WHERE facility_id  = 'FAC-001'
+  AND report_month >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months'
+ORDER BY report_month DESC, mortality_rate DESC
+LIMIT 1000;
+Policy Gate: CLIN-001: Clinical outcome metric. Aggregate only — no PHI in encounter_summaries.
+
+
+Q05  What are all Patient_Safety quality metrics currently below target at FAC-001?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): quality_metrics
+Expected Answer: Returns HAI Rate, Medication Error Rate, Falls per 1000 Patient Days with performance_status IN ('Below_Target','Critical') for FAC-001.
+SELECT
+    metric_name, metric_category, metric_value,
+    target_value, benchmark_value, performance_status, report_month
+FROM quality_metrics
+WHERE facility_id       = 'FAC-001'
+  AND metric_category   = 'Patient_Safety'
+  AND performance_status IN ('Below_Target','Critical')
+ORDER BY report_month DESC
+LIMIT 1000;
+Policy Gate: CLIN-001: Quality metrics are aggregate clinical indicators — Sensitivity: Low. No patient PHI.
+
+
+Q06  Compare bed occupancy between Cardiology and Emergency Medicine at FAC-001
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns avg bed_occupancy_rate for both departments. Cardiology 70–85%, Emergency 80–95% typically.
+SELECT
+    department_name,
+    ROUND(AVG(bed_occupancy_rate),2) AS avg_occupancy_pct,
+    MAX(bed_occupancy_rate)          AS peak_occupancy_pct
+FROM encounter_summaries
+WHERE facility_id    = 'FAC-001'
+  AND department_name IN ('Cardiology','Emergency Medicine')
+GROUP BY department_name
+ORDER BY avg_occupancy_pct DESC
+LIMIT 1000;
+Policy Gate: CLIN-001: Departmental aggregate comparison. No PHI in analytics.
+
+
+Q07  Show total revenue per encounter type for Cardiology this year
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns INPATIENT, OUTPATIENT, EMERGENCY revenue totals + avg_revenue_per_encounter for Cardiology across all facilities for current year.
+SELECT
+    encounter_type,
+    SUM(total_revenue)                       AS total_revenue,
+    ROUND(AVG(avg_revenue_per_encounter),0)  AS avg_rpe,
+    SUM(total_encounters)                    AS total_encounters
+FROM encounter_summaries
+WHERE department_name = 'Cardiology'
+  AND report_month   >= DATE_TRUNC('year', CURRENT_DATE)
+GROUP BY encounter_type
+ORDER BY total_revenue DESC
+LIMIT 1000;
+Policy Gate: CLIN-001: Revenue aggregate — no patient-level billing data.
+
+
+Q08  What is the disease burden by age group for cardiovascular conditions at FAC-001?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): population_health
+Expected Answer: Returns patient_count + avg_cost + avg_los by age_group for Cardiovascular disease at FAC-001. Highest counts expected in 60-74 and 75+ groups.
+SELECT
+    age_group, gender,
+    SUM(patient_count)               AS patient_count,
+    ROUND(AVG(avg_cost),0)           AS avg_cost,
+    ROUND(AVG(avg_los),1)            AS avg_los_days,
+    ROUND(AVG(complication_rate),3)  AS avg_complication_rate
+FROM population_health
+WHERE facility_id      = 'FAC-001'
+  AND disease_category = 'Cardiovascular'
+GROUP BY age_group, gender
+ORDER BY age_group
+LIMIT 1000;
+Policy Gate: CLIN-001: population_health is fully de-identified aggregate. No patient identifiers.
+
+
+Q09  List all active research cohorts in the Cardiology department
+DB: apollo_analytics · PostgreSQL  ·  Table(s): research_cohorts
+Expected Answer: Returns APOLLO-CARD-001 — 'Outcomes of TAVI in Indian Population', PI: Dr. R. Sharma, status: ACTIVE with enrollment dates and IRB number.
+SELECT
+    cohort_name, study_id, principal_investigator,
+    patient_count, enrollment_start, enrollment_end,
+    status, irb_approval_number
+FROM research_cohorts
+WHERE department_id = 'DEPT-CARD'
+  AND status        = 'ACTIVE'
+ORDER BY enrollment_start DESC
+LIMIT 1000;
+Policy Gate: CLIN-001: Research cohorts — no individual patient identifiers. Permitted for clinical provider.
+
+
+Q10  Show monthly encounter trend for Cardiology at FAC-001 for full year 2025
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns 12 rows (Jan–Dec 2025) with total_encounters, total_admissions, total_discharges for Cardiology/FAC-001.
+SELECT
+    report_month, encounter_type,
+    total_encounters, total_admissions, total_discharges,
+    avg_length_of_stay, bed_occupancy_rate
+FROM encounter_summaries
+WHERE facility_id    = 'FAC-001'
+  AND department_name = 'Cardiology'
+  AND report_month  >= '2025-01-01'
+  AND report_month  <  '2026-01-01'
+ORDER BY report_month ASC
+LIMIT 1000;
+Policy Gate: CLIN-001: Full 2025 history scoped to FAC-001 + Cardiology. Aggregate only. No PHI.
+________________
+
+
+Anita Kumar
+Registered Nurse — Cardiology, FAC-001 | Units: UNIT-1A-APJH, UNIT-1B-APJH  ·  OID: oid-nurse-kumar-2847  ·  EmpID: EMP-0151
+
+
+Applied Policies: CLIN-002, HIPAA-001 | Clearance 2 | max_rows=500 | full_name=PARTIAL, DOB=YEAR_ONLY, Aadhaar=DENY
+Q01  What is the current bed occupancy rate at FAC-001 this month?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns bed_occupancy_rate per department for FAC-001 in the current month. Values between 55–95%. max_rows=500 enforced.
+SELECT
+    department_name, encounter_type,
+    bed_occupancy_rate, total_encounters, total_admissions
+FROM encounter_summaries
+WHERE facility_id  = 'FAC-001'
+  AND report_month = DATE_TRUNC('month', CURRENT_DATE)
+ORDER BY bed_occupancy_rate DESC
+LIMIT 500;
+Policy Gate: CLIN-002: FAC-001 scoped. max_rows=500 enforced. No patient identifiers in encounter_summaries.
+
+
+Q02  Show total admissions vs discharges for Cardiology last month
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns total_admissions, total_discharges and census_delta (difference) for Cardiology at FAC-001 for last month.
+SELECT
+    encounter_type,
+    SUM(total_admissions)   AS total_admissions,
+    SUM(total_discharges)   AS total_discharges,
+    SUM(total_admissions) - SUM(total_discharges) AS census_delta
+FROM encounter_summaries
+WHERE facility_id    = 'FAC-001'
+  AND department_name = 'Cardiology'
+  AND report_month = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+GROUP BY encounter_type
+LIMIT 500;
+Policy Gate: CLIN-002: Cardiology + FAC-001 + last month. Aggregate — no PHI. max_rows=500.
+
+
+Q03  What is the readmission count for FAC-001 Cardiology in the last 30 days?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns SUM(readmission_count) and AVG(readmission_rate) for Cardiology at FAC-001 for rolling 30-day window.
+SELECT
+    SUM(readmission_count)          AS total_readmissions,
+    ROUND(AVG(readmission_rate),2)  AS avg_readmission_rate_pct
+FROM encounter_summaries
+WHERE facility_id    = 'FAC-001'
+  AND department_name = 'Cardiology'
+  AND report_month  >= CURRENT_DATE - INTERVAL '30 days'
+LIMIT 500;
+Policy Gate: CLIN-002: 30-day aggregate. FAC-001 + Cardiology scoped. max_rows=500.
+
+
+Q04  Show average length of stay per department at FAC-001 this quarter
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns avg_length_of_stay grouped by department + encounter_type for current quarter. INPATIENT has highest LOS. max_rows=500.
+SELECT
+    department_name, encounter_type,
+    ROUND(AVG(avg_length_of_stay),1) AS avg_los_days,
+    SUM(total_encounters)            AS total_encounters
+FROM encounter_summaries
+WHERE facility_id  = 'FAC-001'
+  AND report_month >= DATE_TRUNC('quarter', CURRENT_DATE)
+GROUP BY department_name, encounter_type
+ORDER BY avg_los_days DESC
+LIMIT 500;
+Policy Gate: CLIN-002: Quarter aggregate. FAC-001 scoped. max_rows=500 enforced by L7.
+
+
+Q05  List all Patient_Safety quality metrics for FAC-001 this month
+DB: apollo_analytics · PostgreSQL  ·  Table(s): quality_metrics
+Expected Answer: Returns HAI Rate, Surgical Site Infection Rate, Falls per 1000 Patient Days, Medication Error Rate, Hand Hygiene Compliance for FAC-001.
+SELECT
+    metric_name, metric_category,
+    metric_value, target_value, performance_status
+FROM quality_metrics
+WHERE facility_id    = 'FAC-001'
+  AND metric_category = 'Patient_Safety'
+  AND report_month   = DATE_TRUNC('month', CURRENT_DATE)
+ORDER BY metric_name
+LIMIT 500;
+Policy Gate: CLIN-002: Patient safety metrics — Sensitivity: Low aggregate. No PHI. max_rows=500.
+
+
+Q06  Compare bed occupancy between FAC-001 (Hyderabad) and FAC-002 (New Delhi) this month
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns avg bed_occupancy_rate for both facilities side-by-side for current month. Cross-facility comparison on aggregate data is allowed.
+SELECT
+    facility_id, facility_name, department_name,
+    ROUND(AVG(bed_occupancy_rate),2) AS avg_occupancy_pct
+FROM encounter_summaries
+WHERE facility_id  IN ('FAC-001','FAC-002')
+  AND report_month  = DATE_TRUNC('month', CURRENT_DATE)
+GROUP BY facility_id, facility_name, department_name
+ORDER BY facility_id, avg_occupancy_pct DESC
+LIMIT 500;
+Policy Gate: CLIN-002: Analytics summary — no patient-level data. Two-facility comparison allowed. max_rows=500.
+
+
+Q07  Show monthly encounter trend for Cardiology at FAC-001 for 2025
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns 12 monthly rows for 2025 showing total_encounters, admissions, discharges for Cardiology/FAC-001.
+SELECT
+    report_month, encounter_type,
+    total_encounters, total_admissions, total_discharges, bed_occupancy_rate
+FROM encounter_summaries
+WHERE facility_id    = 'FAC-001'
+  AND department_name = 'Cardiology'
+  AND report_month  >= '2025-01-01'
+  AND report_month  <  '2026-01-01'
+ORDER BY report_month ASC
+LIMIT 500;
+Policy Gate: CLIN-002: Full 2025 history for assigned department. Aggregate only. max_rows=500.
+
+
+Q08  What is the population health burden for the 45-59 age group at FAC-001?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): population_health
+Expected Answer: Returns disease_category breakdown for 45–59 age group at FAC-001. Cardiovascular and Endocrine expected highest in this bracket.
+SELECT
+    disease_category, gender,
+    SUM(patient_count)      AS patient_count,
+    ROUND(AVG(avg_cost),0)  AS avg_cost,
+    ROUND(AVG(avg_los),1)   AS avg_los_days
+FROM population_health
+WHERE facility_id = 'FAC-001'
+  AND age_group   = '45-59'
+GROUP BY disease_category, gender
+ORDER BY patient_count DESC
+LIMIT 500;
+Policy Gate: CLIN-002: De-identified aggregate population data. No patient PHI. max_rows=500.
+
+
+Q09  How many total encounters were recorded at each Apollo facility last month?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns all 8 facilities with SUM(total_encounters) for previous month, ordered highest to lowest. Ward planning context.
+SELECT
+    facility_id, facility_name,
+    SUM(total_encounters)  AS total_encounters,
+    SUM(total_admissions)  AS total_admissions
+FROM encounter_summaries
+WHERE report_month = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+GROUP BY facility_id, facility_name
+ORDER BY total_encounters DESC
+LIMIT 500;
+Policy Gate: CLIN-002: Cross-facility count — aggregate analytics. No PHI. max_rows=500.
+
+
+Q10  What quality metrics at FAC-001 are currently marked as Critical?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): quality_metrics
+Expected Answer: Returns any metrics with performance_status = 'Critical' at FAC-001. High-priority clinical alerts for nursing safety awareness.
+SELECT
+    metric_name, metric_category,
+    metric_value, target_value, performance_status, report_month
+FROM quality_metrics
+WHERE facility_id        = 'FAC-001'
+  AND performance_status = 'Critical'
+ORDER BY report_month DESC
+LIMIT 500;
+Policy Gate: CLIN-002: Critical quality alerts — aggregate indicator, no PHI. max_rows=500.
+________________
+
+
+Maria Fernandes
+Billing Clerk — Billing & Revenue Cycle, FAC-001  ·  OID: oid-bill-maria-5521  ·  EmpID: EMP-0301
+
+
+Applied Policies: BIZ-001, HIPAA-001, SEC-002 | Clearance 2 | max_rows=2000 | No clinical columns, Aadhaar=DENY, DOB=DENY
+Q01  What is the total revenue generated at FAC-001 for the current month?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns SUM(total_revenue) and AVG(avg_revenue_per_encounter) for FAC-001 current month. No patient-level data — aggregate only.
+SELECT
+    facility_name,
+    SUM(total_revenue)                       AS total_revenue,
+    ROUND(AVG(avg_revenue_per_encounter),0)  AS avg_rpe,
+    SUM(total_encounters)                    AS total_encounters
+FROM encounter_summaries
+WHERE facility_id  = 'FAC-001'
+  AND report_month = DATE_TRUNC('month', CURRENT_DATE)
+GROUP BY facility_name
+LIMIT 2000;
+Policy Gate: BIZ-001: Revenue aggregate — no patient identifiers. SEC-002 not triggered (no Clinical JOIN). max_rows=2000.
+
+
+Q02  Show average revenue per encounter for each department at FAC-001
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns department_name ranked by avg_revenue_per_encounter. High-revenue depts: Transplant Surgery, Oncology, Cardiology.
+SELECT
+    department_name, encounter_type,
+    ROUND(AVG(avg_revenue_per_encounter),0) AS avg_rpe,
+    SUM(total_revenue)                      AS total_revenue,
+    SUM(total_encounters)                   AS total_encounters
+FROM encounter_summaries
+WHERE facility_id = 'FAC-001'
+GROUP BY department_name, encounter_type
+ORDER BY avg_rpe DESC
+LIMIT 2000;
+Policy Gate: BIZ-001: Department revenue ranking — no PHI. Revenue columns Sensitivity 3 — allowed for billing roles.
+
+
+Q03  What is the total revenue trend for Apollo Jubilee Hills over the last 6 months?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns 6 monthly rows with SUM(total_revenue) and encounter count for FAC-001. Shows revenue growth/decline trend.
+SELECT
+    report_month, encounter_type,
+    SUM(total_revenue)                       AS monthly_revenue,
+    SUM(total_encounters)                    AS total_encounters,
+    ROUND(AVG(avg_revenue_per_encounter),0)  AS avg_rpe
+FROM encounter_summaries
+WHERE facility_id  = 'FAC-001'
+  AND report_month >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months'
+GROUP BY report_month, encounter_type
+ORDER BY report_month ASC
+LIMIT 2000;
+Policy Gate: BIZ-001: 6-month revenue trend. Aggregate — no PHI. max_rows=2000.
+
+
+Q04  Which Apollo facility has the highest total revenue this quarter?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns all 8 facilities ranked by SUM(total_revenue) for current quarter. FAC-002 (Indraprastha, New Delhi, 710 beds) likely highest.
+SELECT
+    facility_id, facility_name,
+    SUM(total_revenue)    AS total_revenue,
+    SUM(total_encounters) AS total_encounters
+FROM encounter_summaries
+WHERE report_month >= DATE_TRUNC('quarter', CURRENT_DATE)
+GROUP BY facility_id, facility_name
+ORDER BY total_revenue DESC
+LIMIT 2000;
+Policy Gate: BIZ-001: Cross-facility revenue ranking. Aggregate. No PHI. max_rows=2000.
+
+
+Q05  Show revenue breakdown by encounter type (INPATIENT, OUTPATIENT, EMERGENCY) at FAC-001
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns revenue totals + % share per encounter type for FAC-001. INPATIENT typically 60–70% of total revenue.
+SELECT
+    encounter_type,
+    SUM(total_revenue)    AS total_revenue,
+    SUM(total_encounters) AS total_encounters,
+    ROUND(100.0 * SUM(total_revenue) /
+        NULLIF(SUM(SUM(total_revenue)) OVER (),0),2) AS revenue_share_pct
+FROM encounter_summaries
+WHERE facility_id = 'FAC-001'
+GROUP BY encounter_type
+ORDER BY total_revenue DESC
+LIMIT 2000;
+Policy Gate: BIZ-001: Revenue share via window function. Aggregate — HIPAA-001 Minimum Necessary met.
+
+
+Q06  Compare average revenue per encounter for Cardiology vs Oncology across all facilities
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns two rows — Cardiology and Oncology — with AVG(avg_revenue_per_encounter). Oncology typically higher due to chemotherapy costs.
+SELECT
+    department_name,
+    ROUND(AVG(avg_revenue_per_encounter),0) AS avg_rpe,
+    SUM(total_revenue)                      AS total_revenue,
+    SUM(total_encounters)                   AS total_encounters
+FROM encounter_summaries
+WHERE department_name IN ('Cardiology','Oncology')
+GROUP BY department_name
+ORDER BY avg_rpe DESC
+LIMIT 2000;
+Policy Gate: BIZ-001: Two-department revenue comparison — aggregate, no PHI. Billing analytics.
+
+
+Q07  What is the total revenue across all 8 Apollo facilities this year (YTD)?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns enterprise-wide YTD revenue totals by facility. All 8 facilities returned.
+SELECT
+    facility_id, facility_name,
+    SUM(total_revenue)    AS total_revenue_ytd,
+    SUM(total_encounters) AS total_encounters_ytd
+FROM encounter_summaries
+WHERE report_month >= DATE_TRUNC('year', CURRENT_DATE)
+GROUP BY facility_id, facility_name
+ORDER BY total_revenue_ytd DESC
+LIMIT 2000;
+Policy Gate: BIZ-001: Enterprise revenue aggregate. No row filters on analytics summaries for billing roles.
+
+
+Q08  Show monthly revenue vs encounter count for FAC-001 in 2025
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns 12 monthly rows for FAC-001 across 2025 with SUM(total_revenue) and SUM(total_encounters).
+SELECT
+    report_month,
+    SUM(total_revenue)    AS monthly_revenue,
+    SUM(total_encounters) AS monthly_encounters,
+    ROUND(SUM(total_revenue)/NULLIF(SUM(total_encounters),0),0) AS rpe_calc
+FROM encounter_summaries
+WHERE facility_id  = 'FAC-001'
+  AND report_month >= '2025-01-01'
+  AND report_month <  '2026-01-01'
+GROUP BY report_month
+ORDER BY report_month ASC
+LIMIT 2000;
+Policy Gate: BIZ-001: Revenue vs volume 2025 trend. FAC-001 scoped. Aggregate — no PHI. max_rows=2000.
+
+
+Q09  Which single department generates the highest average revenue per encounter at FAC-001?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns the top-1 department by avg_revenue_per_encounter at FAC-001. Expected: Transplant Surgery or Cardiac Surgery.
+SELECT
+    department_name,
+    ROUND(AVG(avg_revenue_per_encounter),0) AS avg_rpe,
+    SUM(total_revenue)                      AS total_revenue
+FROM encounter_summaries
+WHERE facility_id = 'FAC-001'
+GROUP BY department_name
+ORDER BY avg_rpe DESC
+LIMIT 1;
+Policy Gate: BIZ-001: Top-1 department RPE. Aggregate. No PHI. Fully within BIZ-001 scope.
+
+
+Q10  Show all quality metrics for FAC-001 this month across all categories
+DB: apollo_analytics · PostgreSQL  ·  Table(s): quality_metrics
+Expected Answer: Returns all 14 quality metric types for FAC-001 current month: metric_name, metric_value, target_value, performance_status across 4 categories.
+SELECT
+    metric_name, metric_category,
+    metric_value, target_value, performance_status
+FROM quality_metrics
+WHERE facility_id  = 'FAC-001'
+  AND report_month = DATE_TRUNC('month', CURRENT_DATE)
+ORDER BY metric_category, metric_name
+LIMIT 2000;
+Policy Gate: BIZ-001: Quality metrics Sensitivity: Low — no PHI. Billing operational context permitted.
+________________
+
+
+Vikram Joshi
+IT Administrator — Information Technology, FAC-001  ·  OID: oid-it-admin-7801  ·  EmpID: EMP-0371
+
+
+Applied Policies: HIPAA-001 only | Clearance 2 | No PHI tables | Aggregate / metadata queries only
+Q01  How many total records exist across all 4 tables in the analytics database?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries, quality_metrics, population_health, research_cohorts
+Expected Answer: Returns COUNT(*) per table. Expected: encounter_summaries ~2,300+, quality_metrics ~13,000+, population_health ~4,800+, research_cohorts = 8.
+SELECT 'encounter_summaries' AS table_name, COUNT(*) AS record_count FROM encounter_summaries
+UNION ALL
+SELECT 'quality_metrics',            COUNT(*) FROM quality_metrics
+UNION ALL
+SELECT 'population_health',          COUNT(*) FROM population_health
+UNION ALL
+SELECT 'research_cohorts',           COUNT(*) FROM research_cohorts
+ORDER BY record_count DESC;
+Policy Gate: HIPAA-001: Metadata COUNT query — no PHI. IT schema verification. Analytics tables Sensitivity: Low.
+
+
+Q02  What are the distinct facility IDs and names in the analytics database?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns 8 rows: FAC-001 through FAC-008 with facility names. Public reference data (Sensitivity: 1). IT system verification.
+SELECT DISTINCT facility_id, facility_name
+FROM encounter_summaries
+ORDER BY facility_id
+LIMIT 1000;
+Policy Gate: HIPAA-001: Facility names are Sensitivity Level 1 (Public). No PHI. IT metadata query.
+
+
+Q03  What is the date range (earliest and latest report_month) in the encounter_summaries table?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns MIN = 2025-01-01, MAX = 2025-12-01 (12 months seed data). Plus total_records, facility_count, department_count.
+SELECT
+    MIN(report_month) AS earliest_month,
+    MAX(report_month) AS latest_month,
+    COUNT(*)          AS total_records,
+    COUNT(DISTINCT facility_id)     AS facility_count,
+    COUNT(DISTINCT department_name) AS department_count
+FROM encounter_summaries;
+Policy Gate: HIPAA-001: Schema metadata query — no PHI. IT data range verification.
+
+
+Q04  Show all encounter summary records inserted in the last 7 days ordered by total encounters
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns records with created_at >= NOW() - 7 days ordered by total_encounters. If no recent inserts in test data, returns empty set — validates pipeline data freshness.
+SELECT
+    facility_id, facility_name, department_name,
+    encounter_type, report_month, total_encounters, created_at
+FROM encounter_summaries
+WHERE created_at >= NOW() - INTERVAL '7 days'
+ORDER BY total_encounters DESC
+LIMIT 1000;
+Policy Gate: HIPAA-001: created_at monitoring query. Aggregate records — no PHI. IT operational oversight.
+
+
+Q05  List all Critical quality metrics across all facilities
+DB: apollo_analytics · PostgreSQL  ·  Table(s): quality_metrics
+Expected Answer: Returns all Critical performance_status metrics across all 8 facilities. IT monitors for system-wide quality alert patterns.
+SELECT
+    facility_id, metric_name, metric_category,
+    metric_value, target_value, performance_status, report_month
+FROM quality_metrics
+WHERE performance_status = 'Critical'
+ORDER BY report_month DESC, facility_id
+LIMIT 1000;
+Policy Gate: HIPAA-001: Quality metrics Sensitivity: Low aggregate. No PHI. IT system monitoring.
+
+
+Q06  How many quality metrics are below target per facility this month?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): quality_metrics
+Expected Answer: Returns facility_id with count of Below_Target + Critical metrics for current month. IT dashboard metric for health overview.
+SELECT
+    facility_id, performance_status,
+    COUNT(*) AS metric_count
+FROM quality_metrics
+WHERE report_month        = DATE_TRUNC('month', CURRENT_DATE)
+  AND performance_status IN ('Below_Target','Critical')
+GROUP BY facility_id, performance_status
+ORDER BY facility_id
+LIMIT 1000;
+Policy Gate: HIPAA-001: Below-target count aggregate. No PHI. IT operational dashboard.
+
+
+Q07  Show all active research cohorts with their patient counts
+DB: apollo_analytics · PostgreSQL  ·  Table(s): research_cohorts
+Expected Answer: Returns all 8 ACTIVE research cohorts with cohort_name, study_id, patient_count, enrollment dates, IRB number. IT verifies data load.
+SELECT
+    cohort_name, study_id, principal_investigator,
+    department_id, patient_count,
+    enrollment_start, enrollment_end, status, irb_approval_number
+FROM research_cohorts
+WHERE status = 'ACTIVE'
+ORDER BY enrollment_start DESC
+LIMIT 1000;
+Policy Gate: HIPAA-001: Research cohorts — no direct patient identifiers. Sensitivity: Medium. IT data verification.
+
+
+Q08  What distinct department names exist in the encounter_summaries table?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns all distinct department_id and department_name values. Expected ~26 departments (18 clinical + 8 non-clinical). IT schema validation.
+SELECT DISTINCT department_id, department_name
+FROM encounter_summaries
+ORDER BY department_name
+LIMIT 1000;
+Policy Gate: HIPAA-001: Department names Sensitivity Level 1 (Public). No PHI. IT reference data validation.
+
+
+Q09  How many research cohorts are there per department?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): research_cohorts
+Expected Answer: Returns department_id with COUNT of cohorts and SUM(patient_count). 1 cohort per department expected in seed data.
+SELECT
+    department_id,
+    COUNT(*)           AS cohort_count,
+    SUM(patient_count) AS total_enrolled_patients
+FROM research_cohorts
+GROUP BY department_id
+ORDER BY cohort_count DESC
+LIMIT 1000;
+Policy Gate: HIPAA-001: Aggregate cohort count — no patient identifiers. IT data integrity check.
+
+
+Q10  Show population health record count by facility and quarter
+DB: apollo_analytics · PostgreSQL  ·  Table(s): population_health
+Expected Answer: Returns record counts per facility_id and report_quarter. Only FAC-001 to FAC-004 have population_health data in seed (first 4 facilities). IT data coverage check.
+SELECT
+    facility_id, report_quarter,
+    COUNT(*)           AS record_count,
+    SUM(patient_count) AS total_patients
+FROM population_health
+GROUP BY facility_id, report_quarter
+ORDER BY facility_id, report_quarter
+LIMIT 1000;
+Policy Gate: HIPAA-001: Aggregate count — de-identified population data. No PHI. IT data coverage verification.
+________________
+
+
+Priya Mehta
+HR Manager — Human Resources, FAC-001  ·  OID: oid-hr-priya-7701  ·  EmpID: EMP-0351
+
+
+Applied Policies: HR-001, HIPAA-001, SEC-001, SEC-003 | Clearance 3 | max_rows=5000 | HR domain + analytics read | No Clinical JOIN (SEC-001)
+Q01  What is the total encounter count and readmission rate for FAC-001 this year?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): encounter_summaries
+Expected Answer: Returns total_encounters and AVG(readmission_rate) by department for FAC-001 YTD. HR uses for workforce capacity planning.
+SELECT
+    department_name,
+    SUM(total_encounters)           AS total_encounters,
+    SUM(readmission_count)          AS total_readmissions,
+    ROUND(AVG(readmission_rate),2)  AS avg_readmission_rate_pct
+FROM encounter_summaries
+WHERE facility_id  = 'FAC-001'
+  AND report_month >= DATE_TRUNC('year', CURRENT_DATE)
+GROUP BY department_name
+ORDER BY total_encounters DESC
+LIMIT 5000;
+Policy Gate: HR-001: Analytics read for workforce planning. No PHI. SEC-001 not triggered (no Clinical JOIN). max_rows=5000.
+
+
+Q02  Show all Patient_Safety quality metrics across all facilities
+DB: apollo_analytics · PostgreSQL  ·  Table(s): quality_metrics
+Expected Answer: Returns HAI Rate, Falls, Medication Errors, Hand Hygiene Compliance for all 8 facilities. HR uses for training gap analysis.
+SELECT
+    facility_id, metric_name, metric_category,
+    report_month, metric_value, target_value, performance_status
+FROM quality_metrics
+WHERE metric_category = 'Patient_Safety'
+ORDER BY facility_id, report_month DESC
+LIMIT 5000;
+Policy Gate: HR-001: Patient safety metrics — aggregate, no PHI. HR workforce compliance monitoring.
+
+
+Q03  List all quality metrics above target for FAC-001 this month
+DB: apollo_analytics · PostgreSQL  ·  Table(s): quality_metrics
+Expected Answer: Returns all Above_Target metrics for FAC-001 current month. HR identifies high-performing departments for recognition programs.
+SELECT
+    metric_name, metric_category,
+    metric_value, target_value, benchmark_value, performance_status
+FROM quality_metrics
+WHERE facility_id        = 'FAC-001'
+  AND report_month       = DATE_TRUNC('month', CURRENT_DATE)
+  AND performance_status = 'Above_Target'
+ORDER BY metric_category, metric_name
+LIMIT 5000;
+Policy Gate: HR-001: Above_Target quality metrics — aggregate, no PHI. HR performance management context.
+
+
+Q04  What is the population health breakdown by age group and gender at FAC-001?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): population_health
+Expected Answer: Returns patient_count, avg_cost, avg_los by age_group × gender for FAC-001. All 6 age groups × 2 genders. HR workforce staffing planning.
+SELECT
+    age_group, gender,
+    SUM(patient_count)               AS total_patients,
+    SUM(encounter_count)             AS total_encounters,
+    ROUND(AVG(avg_cost),0)           AS avg_cost,
+    ROUND(AVG(avg_los),1)            AS avg_los_days
+FROM population_health
+WHERE facility_id = 'FAC-001'
+GROUP BY age_group, gender
+ORDER BY age_group, gender
+LIMIT 5000;
+Policy Gate: HR-001: De-identified aggregate. Age group + gender are non-PHI. Workforce planning.
+
+
+Q05  Show disease category distribution for the 45-59 age group across all facilities
+DB: apollo_analytics · PostgreSQL  ·  Table(s): population_health
+Expected Answer: Returns top disease categories for 45–59 group across FAC-001 to FAC-004. HR uses for occupational health planning.
+SELECT
+    facility_id, disease_category,
+    SUM(patient_count)      AS patient_count,
+    ROUND(AVG(avg_cost),0)  AS avg_cost
+FROM population_health
+WHERE age_group = '45-59'
+GROUP BY facility_id, disease_category
+ORDER BY facility_id, patient_count DESC
+LIMIT 5000;
+Policy Gate: HR-001: Age-group disease distribution — de-identified. No PHI. HR occupational health planning.
+
+
+Q06  What is the average treatment cost by disease category at FAC-001 this quarter?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): population_health
+Expected Answer: Returns disease_category with avg_cost + avg_los for current quarter at FAC-001. Oncology + Cardiovascular expected highest costs.
+SELECT
+    disease_category,
+    SUM(patient_count)               AS patient_count,
+    ROUND(AVG(avg_cost),0)           AS avg_cost_per_patient,
+    ROUND(AVG(avg_los),1)            AS avg_los_days
+FROM population_health
+WHERE facility_id    = 'FAC-001'
+  AND report_quarter >= DATE_TRUNC('quarter', CURRENT_DATE)
+GROUP BY disease_category
+ORDER BY avg_cost_per_patient DESC
+LIMIT 5000;
+Policy Gate: HR-001: Cost aggregate for workforce budget planning. De-identified. max_rows=5000.
+
+
+Q07  Show population health data for female patients across all age groups at FAC-001
+DB: apollo_analytics · PostgreSQL  ·  Table(s): population_health
+Expected Answer: Returns all 6 age groups for Female gender at FAC-001 with disease breakdown, avg_cost, complication_rate.
+SELECT
+    age_group, disease_category,
+    SUM(patient_count)               AS patient_count,
+    ROUND(AVG(avg_cost),0)           AS avg_cost,
+    ROUND(AVG(complication_rate),3)  AS avg_complication_rate
+FROM population_health
+WHERE facility_id = 'FAC-001'
+  AND gender      = 'Female'
+GROUP BY age_group, disease_category
+ORDER BY age_group, patient_count DESC
+LIMIT 5000;
+Policy Gate: HR-001: Female population aggregate — de-identified, no patient PHI. Gender non-PHI at aggregate. max_rows=5000.
+
+
+Q08  List all research cohorts with patient counts and enrollment date ranges
+DB: apollo_analytics · PostgreSQL  ·  Table(s): research_cohorts
+Expected Answer: Returns all 8 cohorts with cohort_name, study_id, PI, patient_count, dates, IRB number. HR uses for research staff credentialing oversight.
+SELECT
+    cohort_name, study_id, principal_investigator,
+    department_id, patient_count,
+    enrollment_start, enrollment_end, status, irb_approval_number
+FROM research_cohorts
+ORDER BY enrollment_start DESC
+LIMIT 5000;
+Policy Gate: HR-001: Research cohort PI and IRB info relevant for HR credentialing. No patient identifiers.
+
+
+Q09  What is the average length of stay by age group at FAC-001?
+DB: apollo_analytics · PostgreSQL  ·  Table(s): population_health
+Expected Answer: Returns avg_los_days per age_group across all diseases at FAC-001. 75+ age group expected highest LOS (7–10 days). HR nurse staffing projection.
+SELECT
+    age_group,
+    ROUND(AVG(avg_los),1)            AS avg_los_days,
+    ROUND(AVG(avg_cost),0)           AS avg_cost,
+    SUM(patient_count)               AS total_patients
+FROM population_health
+WHERE facility_id = 'FAC-001'
+GROUP BY age_group
+ORDER BY age_group
+LIMIT 5000;
+Policy Gate: HR-001: LOS by age group — de-identified aggregate for staffing ratios. No PHI. max_rows=5000.
+
+
+Q10  Show quality metrics with Below_Target or Critical status across all departments and facilities
+DB: apollo_analytics · PostgreSQL  ·  Table(s): quality_metrics
+Expected Answer: Returns all Below_Target + Critical metrics enterprise-wide across all 8 facilities, ordered by most recent. HR identifies departments needing training.
+SELECT
+    facility_id, department_id, metric_name, metric_category,
+    metric_value, target_value, performance_status, report_month
+FROM quality_metrics
+WHERE performance_status IN ('Below_Target','Critical')
+ORDER BY report_month DESC, facility_id, metric_category
+LIMIT 5000;
+Policy Gate: HR-001: Below-target metrics enterprise-wide — aggregate quality indicators, no PHI. HR training gap analysis. max_rows=5000.
+Apollo Hospitals — Zero Trust NL-to-SQL  ·  Product Test Guide  ·  Page  of

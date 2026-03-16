@@ -15,7 +15,7 @@ class TestScenario1BillingClinicalColumnLeak:
 
     def test_clinical_notes_denied_to_billing(self, billing_envelope):
         sql = "SELECT mrn, clinical_notes FROM claims"
-        parsed = parse_sql(sql)
+        parsed = parse_sql(sql, "postgresql")
         result = gate1(parsed, billing_envelope)
         assert result.status == GateStatus.FAIL
         codes = [v.code for v in result.violations]
@@ -23,7 +23,7 @@ class TestScenario1BillingClinicalColumnLeak:
 
     def test_billing_columns_allowed(self, billing_envelope):
         sql = "SELECT claim_id, mrn, total_amount FROM claims WHERE service_date > '2024-01-01'"
-        parsed = parse_sql(sql)
+        parsed = parse_sql(sql, "postgresql")
         result = gate1(parsed, billing_envelope)
         assert result.status == GateStatus.PASS
 
@@ -37,7 +37,7 @@ SELECT p.mrn, p.full_name, e.salary
 FROM patients p
 JOIN employees e ON p.mrn = e.employee_id
 """
-        parsed = parse_sql(sql)
+        parsed = parse_sql(sql, "postgresql")
         result = gate1(parsed, physician_envelope)
         # employees is not in physician's envelope
         assert result.status == GateStatus.FAIL
@@ -50,7 +50,7 @@ class TestScenario4UnionInjection:
 
     def test_union_system_table_blocked(self, physician_envelope):
         sql = "SELECT mrn, full_name FROM patients WHERE unit_id = '3B' UNION SELECT username, password FROM sys.sql_logins"
-        parsed = parse_sql(sql)
+        parsed = parse_sql(sql, "postgresql")
 
         g1_result = gate1(parsed, physician_envelope)
         g3_result = gate3(parsed, sql)
@@ -67,7 +67,7 @@ class TestScenario5AggregationViolation:
 
     def test_patient_identifiers_in_agg_only_select(self, agg_only_envelope):
         sql = "SELECT mrn, full_name, SUM(total_amount) FROM encounters GROUP BY mrn, full_name"
-        parsed = parse_sql(sql)
+        parsed = parse_sql(sql, "postgresql")
         result = gate1(parsed, agg_only_envelope)
         assert result.status == GateStatus.FAIL
         codes = [v.code for v in result.violations]
@@ -81,7 +81,7 @@ class TestScenario6MaskingRewrite:
     def test_gate1_passes_for_masked_column(self, physician_envelope):
         # full_name is MASKED (not HIDDEN), so Gate 1 allows it
         sql = "SELECT mrn, full_name FROM patients WHERE unit_id = '3B' LIMIT 100"
-        parsed = parse_sql(sql)
+        parsed = parse_sql(sql, "postgresql")
         result = gate1(parsed, physician_envelope)
         assert result.status == GateStatus.PASS  # Gate 1 passes; Gate 2 flags for rewriter
 
@@ -91,7 +91,7 @@ class TestScenario6MaskingRewrite:
         from app.services.query_rewriter import rewrite
 
         sql = "SELECT mrn, full_name FROM patients WHERE unit_id = '3B' LIMIT 100"
-        parsed = parse_sql(sql)
+        parsed = parse_sql(sql, "postgresql")
         g2_violations = [Violation(
             gate=2,
             code=ViolationCode.UNMASKED_PII_COLUMN,
@@ -100,7 +100,7 @@ class TestScenario6MaskingRewrite:
             column="full_name",
             detail="Masking required",
         )]
-        result = rewrite(sql, parsed, physician_envelope, gate2_violations=g2_violations)
+        result = rewrite(sql, parsed, physician_envelope, "postgresql", gate2_violations=g2_violations)
         assert result.success
         assert any(r.column == "full_name" for r in result.rewrites)
 
@@ -110,7 +110,7 @@ class TestSSNAlwaysBlocked:
 
     def test_ssn_blocked_for_physician(self, physician_envelope):
         sql = "SELECT mrn, ssn FROM patients WHERE unit_id = '3B'"
-        parsed = parse_sql(sql)
+        parsed = parse_sql(sql, "postgresql")
         result = gate1(parsed, physician_envelope)
         assert result.status == GateStatus.FAIL
         codes = [v.code for v in result.violations]
@@ -118,7 +118,7 @@ class TestSSNAlwaysBlocked:
 
     def test_ssn_blocked_for_billing(self, billing_envelope):
         sql = "SELECT mrn, ssn FROM patients"
-        parsed = parse_sql(sql)
+        parsed = parse_sql(sql, "postgresql")
         result = gate1(parsed, billing_envelope)
         assert result.status == GateStatus.FAIL
 
@@ -140,7 +140,7 @@ class TestFailSecure:
             "DROP TABLE patients",
             "TRUNCATE TABLE patients",
         ]:
-            parsed = parse_sql(write_sql)
+            parsed = parse_sql(write_sql, "postgresql")
             result = gate3(parsed, write_sql)
             codes = [v.code for v in result.violations]
             assert ViolationCode.WRITE_OPERATION in codes, f"Write op not detected for: {write_sql}"

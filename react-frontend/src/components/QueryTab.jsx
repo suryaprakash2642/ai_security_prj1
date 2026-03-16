@@ -22,7 +22,6 @@ const QUICK = [
 
 export default function QueryTab({ auth, pipelineState, onRun }) {
   const [query, setQuery] = useState('')
-  const [dialect, setDialect] = useState('auto')
   const { running, pipeSteps, pipeStatus, sql, sqlDialect, detectedDb, detectedDialect,
     valDetail, valDecision, results, resultCols, execMetrics, layerDetails, shown } = pipelineState
 
@@ -37,23 +36,18 @@ export default function QueryTab({ auth, pipelineState, onRun }) {
             onChange={e => setQuery(e.target.value)}
             placeholder="Ask a clinical question, e.g.: Show me all patients admitted this month with diagnosis of hypertension"
             rows={3}
-            onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) onRun(query, dialect) }}
+            onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) onRun(query) }}
           />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '0 0 auto' }}>
             <button
               className="btn btn-success"
               id="btn-run"
-              onClick={() => onRun(query, dialect)}
+              onClick={() => onRun(query)}
               disabled={!auth || running}
             >
               {running ? <><span className="spinner" /> Running…</> : '▶ Run'}
             </button>
             <button className="btn btn-ghost" onClick={() => setQuery('')}>✕ Clear</button>
-            <select value={dialect} onChange={e => setDialect(e.target.value)} style={{ padding: '6px 8px', fontSize: 12 }}>
-              <option value="auto">Auto-detect</option>
-              <option value="mysql">MySQL</option>
-              <option value="postgresql">PostgreSQL</option>
-            </select>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>

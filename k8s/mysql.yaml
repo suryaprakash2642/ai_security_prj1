@@ -73,7 +73,7 @@ metadata:
   name: mysql
   namespace: sentinelsql
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: mysql
   ports:

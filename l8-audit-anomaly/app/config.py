@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # Event deduplication
     dedup_window_minutes: int = 15
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=("../.env.local", ".env"), extra="ignore")
 
     @property
     def is_dev(self) -> bool:

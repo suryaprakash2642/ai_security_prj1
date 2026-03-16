@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # ── SecurityContext ──
     CONTEXT_TTL_NORMAL: int = 900                                     # 15 minutes
-    CONTEXT_TTL_EMERGENCY: int = 14400                                # 4 hours (BTG)
+    CONTEXT_TTL_EMERGENCY: int = 900                                  # 15 minutes (BTG)
 
     # ── HMAC Signing ──
     HMAC_SECRET_KEY: str = ""                                         # MUST be set via L1_HMAC_SECRET_KEY env
@@ -95,7 +95,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_prefix = "L1_"
-        env_file = ".env"
+        env_file = ("../.env.local", ".env")
         case_sensitive = True
         extra = "ignore"
 

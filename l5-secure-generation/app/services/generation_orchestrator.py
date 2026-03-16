@@ -34,13 +34,25 @@ from app.services import (
 logger = structlog.get_logger(__name__)
 
 
+_SQL_NON_TABLES = frozenset({
+    "select", "where", "group", "order", "having", "limit", "offset",
+    "dual", "lateral", "unnest", "generate_series", "values",
+    "current_date", "current_timestamp", "curdate", "now", "sysdate",
+    "date_trunc", "date_format", "date_add", "date_sub", "interval",
+    "information_schema",
+})
+
+
 def _extract_sql_tables(sql: str) -> set[str]:
     """Extract table names referenced in FROM/JOIN clauses (best-effort)."""
+    # Strip EXTRACT(... FROM ...) so the FROM keyword inside doesn't
+    # get mistaken for a table-source FROM clause.
+    cleaned = re.sub(r'\bEXTRACT\s*\([^)]*\)', '_EXTRACT_REMOVED_', sql, flags=re.IGNORECASE)
     tables: set[str] = set()
-    for m in re.finditer(r"\b(?:from|join)\s+([a-zA-Z_\"`][\w\.\"`]*)", sql, flags=re.IGNORECASE):
-        raw = m.group(1).strip().strip('"`')
-        if raw:
-            tables.add(raw.lower())
+    for m in re.finditer(r"\b(?:from|join)\s+([a-zA-Z_\"`][\w\.\"`]*)", cleaned, flags=re.IGNORECASE):
+        raw = m.group(1).strip().strip('"`').lower()
+        if raw and raw not in _SQL_NON_TABLES:
+            tables.add(raw)
     return tables
 
 
@@ -62,13 +74,57 @@ def _allowed_table_tokens(schema: FilteredSchema) -> set[str]:
     return allowed
 
 
+def _infer_dialect(request: GenerationRequest, sql_tables: set[str]) -> tuple[str, str]:
+    """Infer target_database and dialect from database_metadata and the tables the LLM used.
+
+    Returns:
+        (dialect, target_database)
+
+    Raises ValueError if dialect cannot be determined.
+    """
+    if not request.database_metadata:
+        raise ValueError(
+            "Cannot infer SQL dialect: no database_metadata provided. "
+            "Ensure L3 returns database_metadata in the retrieval response."
+        )
+
+    # Build table_name → db_name map from schema
+    tname_to_db: dict[str, str] = {}
+    for t in request.filtered_schema.tables:
+        parts = (t.table_id or "").split(".")
+        short = (t.table_name or parts[-1] if parts else "").lower()
+        db = parts[0].lower() if parts else ""
+        if short and db:
+            tname_to_db[short] = db
+
+    # Find the most-referenced database in the generated SQL
+    db_counts: dict[str, int] = {}
+    for st in sql_tables:
+        db = tname_to_db.get(st, "")
+        if db:
+            db_counts[db] = db_counts.get(db, 0) + 1
+
+    if not db_counts:
+        # Fall back to first database in metadata
+        first_db = next(iter(request.database_metadata))
+        return request.database_metadata[first_db], first_db
+
+    inferred_db = max(db_counts, key=db_counts.get)  # type: ignore[arg-type]
+    dialect = request.database_metadata.get(inferred_db, "")
+    if not dialect:
+        raise ValueError(
+            f"Database '{inferred_db}' found in SQL but has no dialect in database_metadata. "
+            f"Known databases: {list(request.database_metadata.keys())}"
+        )
+    return dialect, inferred_db
+
+
 async def run(request: GenerationRequest, settings: Settings) -> GenerationResponse:
     """Execute the full L5 generation pipeline."""
     start_ts = time.monotonic()
     log = logger.bind(request_id=request.request_id)
 
     # ── Step 1: Validate Permission Envelope ───────────────────────────────
-    # Skip HMAC check in dev/test if signing key is the dev default
     signing_key = settings.envelope_signing_key
     is_valid, reason = envelope_verifier.verify(request.permission_envelope, signing_key)
     if not is_valid and settings.app_env == "production":
@@ -76,9 +132,6 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
         return GenerationResponse(
             request_id=request.request_id,
             status=GenerationStatus.INVALID_ENVELOPE,
-            generation_metadata=GenerationMetadata(
-                dialect=request.dialect.value,
-            ),
         )
 
     # ── Step 2: Prompt injection scan ─────────────────────────────────────
@@ -94,7 +147,6 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
             status=GenerationStatus.INJECTION_DETECTED,
             generation_metadata=GenerationMetadata(
                 injection_risk_score=scan_result.risk_score,
-                dialect=request.dialect.value,
             ),
         )
 
@@ -105,7 +157,6 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
         sanitized_question=sanitized_question,
         envelope=request.permission_envelope,
         schema=request.filtered_schema,
-        dialect=request.dialect,
         max_prompt_tokens=settings.max_prompt_tokens,
         response_reserve_tokens=settings.response_reserve_tokens,
         default_max_rows=settings.default_max_rows,
@@ -137,7 +188,6 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
                 schema_tables_truncated=assembled.tables_truncated,
                 policy_rules_count=assembled.rules_count,
                 injection_risk_score=scan_result.risk_score,
-                dialect=request.dialect.value,
             ),
         )
 
@@ -145,6 +195,17 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
     parse_result = response_parser.parse(llm_resp.text)
 
     total_latency_ms = (time.monotonic() - start_ts) * 1000
+
+    # ── Step 7: Infer dialect from the tables the LLM actually used ───────
+    sql_tables = _extract_sql_tables(parse_result.sql or "")
+
+    inferred_dialect = ""
+    inferred_db = ""
+    if parse_result.success and sql_tables:
+        try:
+            inferred_dialect, inferred_db = _infer_dialect(request, sql_tables)
+        except ValueError as e:
+            log.error("dialect_inference_failed", error=str(e))
 
     metadata = GenerationMetadata(
         model=llm_resp.model,
@@ -157,7 +218,7 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
         schema_tables_truncated=assembled.tables_truncated,
         policy_rules_count=assembled.rules_count,
         injection_risk_score=scan_result.risk_score,
-        dialect=request.dialect.value,
+        dialect=inferred_dialect,
     )
 
     if parse_result.cannot_answer:
@@ -178,7 +239,6 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
         )
 
     # Hard safety gate: generated SQL must only reference tables in filtered_schema.
-    sql_tables = _extract_sql_tables(parse_result.sql or "")
     allowed = _allowed_table_tokens(request.filtered_schema)
     unknown = [t for t in sql_tables if t not in allowed]
     if unknown:
@@ -194,29 +254,15 @@ async def run(request: GenerationRequest, settings: Settings) -> GenerationRespo
             permission_envelope=request.permission_envelope,
         )
 
-    # Infer target_database and actual dialect from the tables the LLM used.
-    # This is more reliable than the pre-selected dialect because the LLM
-    # chose which tables to reference based on the question context.
-    inferred_db = ""
-    inferred_dialect = request.dialect.value
-    if request.database_metadata and sql_tables:
-        # Build table_name → db_name map from schema
-        tname_to_db: dict[str, str] = {}
-        for t in request.filtered_schema.tables:
-            parts = (t.table_id or "").split(".")
-            short = (t.table_name or parts[-1] if parts else "").lower()
-            db = parts[0].lower() if parts else ""
-            if short and db:
-                tname_to_db[short] = db
-        # Find the most-referenced database in the generated SQL
-        db_counts: dict[str, int] = {}
-        for st in sql_tables:
-            db = tname_to_db.get(st, "")
-            if db:
-                db_counts[db] = db_counts.get(db, 0) + 1
-        if db_counts:
-            inferred_db = max(db_counts, key=db_counts.get)  # type: ignore[arg-type]
-            inferred_dialect = request.database_metadata.get(inferred_db, inferred_dialect)
+    if not inferred_dialect:
+        log.error("no_dialect_inferred", sql_tables=list(sql_tables),
+                  database_metadata=request.database_metadata)
+        return GenerationResponse(
+            request_id=request.request_id,
+            status=GenerationStatus.GENERATION_FAILED,
+            cannot_answer_reason="Could not determine SQL dialect from generated query tables.",
+            generation_metadata=metadata,
+        )
 
     log.info("SQL generated successfully",
              dialect=inferred_dialect,

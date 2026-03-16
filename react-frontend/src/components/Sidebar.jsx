@@ -1,11 +1,23 @@
 import { useState, useEffect } from 'react'
 import { HEALTH_ENDPOINTS, LAYERS, apiFetch } from '../config.js'
 
-export default function Sidebar({ auth, onLogin, onLogout, layerStates, className = '' }) {
+const BTG_ELIGIBLE_ROLES = [
+  'EMERGENCY_PHYSICIAN', 'ATTENDING_PHYSICIAN', 'PSYCHIATRIST',
+  'HEAD_NURSE', 'ICU_NURSE', 'HIPAA_PRIVACY_OFFICER',
+  // Frontend role format variants
+  'Attending_Physician', 'Emergency_Physician', 'Psychiatrist',
+  'Head_Nurse', 'ICU_Nurse', 'HIPAA_Privacy_Officer',
+]
+
+export default function Sidebar({ auth, onLogin, onLogout, btgState, onActivateBTG, layerStates, className = '' }) {
   const [userKey, setUserKey] = useState('physician')
   const [loggingIn, setLoggingIn] = useState(false)
   const [health, setHealth] = useState({})
   const [healthChecking, setHealthChecking] = useState(false)
+  const [btgOpen, setBtgOpen] = useState(false)
+  const [btgReason, setBtgReason] = useState('')
+  const [btgPatient, setBtgPatient] = useState('')
+  const [btgSubmitting, setBtgSubmitting] = useState(false)
 
   async function checkHealth() {
     setHealthChecking(true)
@@ -70,6 +82,73 @@ export default function Sidebar({ auth, onLogin, onLogout, layerStates, classNam
           </div>
         )}
       </div>
+
+      {/* Break-the-Glass */}
+      {auth && (auth.effective_roles || []).some(r => BTG_ELIGIBLE_ROLES.includes(r)) && (
+        <div>
+          <div className="sidebar-section-label">Emergency Access</div>
+          {btgState?.active ? (
+            <div className="btg-active-panel">
+              <div className="btg-active-badge">BTG ACTIVE</div>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 6 }}>
+                <div>Clearance: {btgState.previousClearance} &rarr; {btgState.elevatedClearance}</div>
+                <div>Expires: {btgState.expiresAt.toLocaleTimeString()}</div>
+              </div>
+            </div>
+          ) : !btgOpen ? (
+            <button
+              className="btn btn-danger"
+              style={{ width: '100%' }}
+              onClick={() => setBtgOpen(true)}
+            >
+              Break the Glass
+            </button>
+          ) : (
+            <div className="btg-form">
+              <textarea
+                placeholder="Clinical justification (min 20 chars)..."
+                value={btgReason}
+                onChange={e => setBtgReason(e.target.value)}
+                rows={3}
+                style={{ fontSize: 12 }}
+              />
+              <input
+                placeholder="Patient ID (optional)"
+                value={btgPatient}
+                onChange={e => setBtgPatient(e.target.value)}
+                style={{ fontSize: 12 }}
+              />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  className="btn btn-danger"
+                  style={{ flex: 1 }}
+                  disabled={btgReason.length < 20 || btgSubmitting}
+                  onClick={async () => {
+                    setBtgSubmitting(true)
+                    const ok = await onActivateBTG(btgReason, btgPatient || null)
+                    setBtgSubmitting(false)
+                    if (ok) { setBtgOpen(false); setBtgReason(''); setBtgPatient('') }
+                  }}
+                >
+                  {btgSubmitting ? <><span className="spinner" /> Activating…</> : 'Confirm BTG'}
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => { setBtgOpen(false); setBtgReason(''); setBtgPatient('') }}
+                  disabled={btgSubmitting}
+                >
+                  Cancel
+                </button>
+              </div>
+              {btgReason.length > 0 && btgReason.length < 20 && (
+                <div style={{ fontSize: 10, color: 'var(--yellow)', marginTop: 4 }}>
+                  {20 - btgReason.length} more characters needed
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pipeline Layers */}
       <div>

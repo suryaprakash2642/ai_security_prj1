@@ -200,7 +200,7 @@ class ContextBuilder:
           - emergency.mode → ACTIVE
           - clearance_level → RESTRICTED (5)
           - sensitivity_cap → RESTRICTED (5)
-          - TTL → CONTEXT_TTL_EMERGENCY (14400s = 4h)
+          - TTL → CONTEXT_TTL_EMERGENCY (900s = 15min)
           - Stores reason and timestamps
 
         The original clearance is preserved in emergency.original_clearance
@@ -274,8 +274,9 @@ class ContextBuilder:
             expires_at=now + timedelta(seconds=emergency_ttl),
         )
 
-        # ── Re-sign ──
+        # ── Re-sign (both canonical and flat for L3) ──
         signature = self._signer.sign(updated)
+        context_signature = self._signer.sign_flat(updated)
 
         # ── Update in Redis ──
         self._store.update_context(updated)
@@ -285,7 +286,7 @@ class ContextBuilder:
             ctx.ctx_id, ctx.identity.oid, reason[:50], original_clearance, emergency_ttl,
         )
 
-        return updated, signature
+        return updated, signature, context_signature
 
     # ─────────────────────────────────────────────────────
     # REVOCATION
